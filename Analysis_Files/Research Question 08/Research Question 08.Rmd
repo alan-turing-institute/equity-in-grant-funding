@@ -1,0 +1,786 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 8"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12, warning = FALSE, message = FALSE)
+
+
+## Libraries
+library(dplyr)      # For tidy coding
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(boot)
+library(formatR)
+library(purrr)
+library(ggrepel)    # For helping with labels on graphs
+library(cowplot)
+library(forcats)
+
+
+
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note08"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/Note08"
+
+
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+UKLFdata            <- "PROJ2023.002-DATA004.xlsx"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+# {.tabset}
+
+## Data preparation
+
+```{r datacleaning}
+# Identify the list of Resubmitters ---------------------------------------
+
+df <- EPSRC$Investigators.df
+# Load necessary library
+library(dplyr)
+
+# Sample data frame
+# df <- data.frame(AnonINV = ..., FYDecisionDate = ..., GrantOutcome = ..., FYReceivedDate = ...)
+
+# Function to convert academic year to a start year
+convert_academic_year <- function(academic_year) {
+  as.numeric(substr(academic_year, 1, 4))
+}
+
+# Convert FYDecisionDate and FYReceivedDate to start years
+df <- df %>%
+  mutate(DecisionYear = sapply(FYDecisionDate, convert_academic_year),
+         SubmissionYear = sapply(FYReceivedDate, convert_academic_year))
+
+# Initialize an empty data frame to store results
+results <- data.frame(AnonINV = character(),
+                      OriginalDecisionYear = numeric(),
+                      NextSubmissionYear = numeric(),
+                      YearsToNextSubmission = numeric(),
+                      stringsAsFactors = FALSE)
+
+# Iterate over each unique AnonINV
+unique_invs <- unique(df$AnonINV)
+
+for (inv in unique_invs) {
+  # Get the applications of this investigator, sorted by SubmissionYear
+  inv_applications <- df %>%
+    filter(AnonINV == inv) %>%
+    arrange(SubmissionYear)
+  
+  # Check if the investigator has any funded applications before the first unfunded application
+  has_prior_success <- any(inv_applications$GrantOutcome[inv_applications$SubmissionYear < min(inv_applications$SubmissionYear[inv_applications$GrantOutcome != 'Funded'])] == 'Funded')
+  
+  if (!has_prior_success) {
+    # Track the last unfunded decision year
+    last_unfunded_year <- NA
+    last_unfunded_agerange <- NA
+    
+    for (i in 1:nrow(inv_applications)) {
+      row <- inv_applications[i, ]
+      
+      if (row$GrantOutcome != 'Funded') {
+        # Update the last unfunded decision year
+        last_unfunded_year <- row$DecisionYear
+        last_unfunded_agerange <- row$AgeRange
+        
+      } else if (!is.na(last_unfunded_year) && row$SubmissionYear > last_unfunded_year) {
+        # Calculate the number of years to the next submission after an unfunded decision
+        years_to_next_submission <- row$SubmissionYear - last_unfunded_year
+        
+        # Store the result
+        results <- rbind(results, data.frame(
+          AnonINV = inv,
+          OriginalDecisionYear = last_unfunded_year,
+          NextSubmissionYear = row$SubmissionYear,
+          YearsToNextSubmission = years_to_next_submission,
+          AgeRange = last_unfunded_agerange,
+          stringsAsFactors = FALSE
+        ))
+        
+        # Reset the last unfunded year to avoid counting the same unfunded decision multiple times
+        last_unfunded_year <- NA
+        last_unfunded_agerange <- NA
+      }
+    }
+  }
+}
+resubmitters <- results
+
+# Identify the list of non-resubmitters-----------------------------------
+# Function to convert academic year to a start year
+convert_academic_year <- function(academic_year) {
+  as.numeric(substr(academic_year, 1, 4))
+}
+
+# Convert FYDecisionDate and FYReceivedDate to start years
+df <- df %>%
+  mutate(DecisionYear = sapply(FYDecisionDate, convert_academic_year),
+         SubmissionYear = sapply(FYReceivedDate, convert_academic_year))
+
+# Filter for applicants who made only one submission and it was not funded
+no_resubmissions <- df %>%
+  group_by(AnonINV) %>%
+  filter(n() == 1 & GrantOutcome != 'Funded') %>%
+  ungroup()
+
+# Add in demographic details ----------------------------------------------
+Q8data.df <- no_resubmissions %>% select(AnonINV, AgeRange)
+Q8data.df$Resubmission <- "No Resubmission"
+resubmitters$Resubmission <- "Resubmission"
+resubmitters <- resubmitters %>% select(AnonINV, AgeRange, Resubmission)
+Q8data.df <- Q8data.df %>% rbind(resubmitters) 
+uniquedf <- EPSRC$Investigators.df %>% select(Sex, EthnicityBinary, NationalityBinary, EthnicGroup, Disability, AnonINV)
+uniquedf <- distinct(uniquedf)
+Q8data.df <- Q8data.df %>%left_join(uniquedf , AnonINV, by = "AnonINV")
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+Q8data.df <- Q8data.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over",
+                                       AgeRange == "Unknown" ~ "Unknown"))
+
+# Intersectional demographics
+Q8data.df$Sex_Ethnicity <- interaction(Q8data.df$Sex, Q8data.df$EthnicityBinary)
+Q8data.df$Sex_Age <- interaction(Q8data.df$Sex, Q8data.df$AgeRangeCollapsed)
+Q8data.df$Ethnicity_Age <- interaction(Q8data.df$EthnicityBinary, Q8data.df$AgeRangeCollapsed)
+
+
+
+
+```
+
+
+## Proportions of Resubmitting and Non-resubmitting Populations Belonging to Demographic Groups
+
+```{r}
+##Function-----------------------------------------
+
+# Generalized function to compute counts, proportions, and CIs by group and demographic
+compute_statistics <- function(df, group_col, demo_col, driver = "Uncertain") {
+  
+  # Function to calculate bootstrap CI for proportions
+  boot_ci <- function(data, indices) {
+    sampled_data <- data[indices]
+    prop <- mean(sampled_data)
+    return(prop)
+  }
+
+  # Helper function to compute bootstrapped confidence intervals
+  compute_ci <- function(data) {
+    if (length(data) < 2 || all(is.na(data))) {
+      # If there are fewer than 2 observations or data is NA, return NA for CI
+      return(data.frame(CI_Lower = NA, CI_Upper = NA))
+    }
+    
+    boot_result <- boot(data, boot_ci, R = 1000)
+    ci <- boot.ci(boot_result, type = "basic")
+    
+    if (is.null(ci)) {
+      return(data.frame(CI_Lower = NA, CI_Upper = NA))  # Handle case where bootstrapping fails
+    }
+    
+    return(data.frame(CI_Lower = ci$basic[4], CI_Upper = ci$basic[5]))
+  }
+
+  df <- df %>%
+    rename(Group = !!sym(group_col), Demographic = !!sym(demo_col))
+  
+  groups <- unique(df$Group)
+  results_list <- list()
+  
+  for (group in groups) {
+    group_df <- df %>% filter(Group == group)
+    
+    result <- group_df %>%
+      group_by(Demographic) %>%
+      summarise(
+        Count = n(),
+        Proportion = Count / nrow(group_df)
+      ) %>%
+      ungroup() %>%
+      rowwise() %>%
+      mutate(
+        CI = list(compute_ci(group_df$Demographic == Demographic)),
+        CI_L = CI$CI_Lower,
+        CI_U = CI$CI_Upper
+      ) %>%
+      select(-CI) %>%
+      ungroup() %>%
+      mutate(Year = group)
+    
+    results_list[[group]] <- result
+  }
+  
+  results_df <- bind_rows(results_list) %>%
+    mutate(Group = demo_col)
+  
+  results_df$Driver <- driver
+  return(results_df)
+}
+
+
+
+```
+
+```{r}
+# Function to round columns as specified
+round_columns <- function(df) {
+  df <- df %>%
+    mutate(
+      Count = ifelse(Count < 6, "\u22645", round(Count / 5) * 5),
+      across(where(is.numeric) & !c(Count), ~ ifelse(Count == "\u22645", "~", round(., 3)))
+    )
+  return(df)
+}
+
+```
+
+
+#### Table: Proportion of Resubmitting Population by Levels of Demographics
+
+```{r}
+
+df_sex <- Q8data.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q8data.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q8data.df %>% filter(NationalityBinary != "Unknown")
+df_disability <- Q8data.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_age <- Q8data.df %>% filter(AgeRangeCollapsed != "Unknown" & AgeRangeCollapsed != "Not Disclosed", !is.na(AgeRangeCollapsed))
+
+
+t1 <-compute_statistics(df_sex, "Resubmission", "Sex","")
+t1<- rbind(t1,compute_statistics(df_ethnicity, "Resubmission", "EthnicityBinary",""))
+t1<- rbind(t1,compute_statistics(df_nationality, "Resubmission", "NationalityBinary",""))
+t1<- rbind(t1,compute_statistics(df_disability, "Resubmission", "Disability",""))
+t1<- rbind(t1,compute_statistics(df_age, "Resubmission", "AgeRangeCollapsed",""))
+
+
+table8.01 <- t1 %>% 
+  select(-Driver) %>% 
+  round_columns()
+  
+kable(table8.01)
+```
+
+#### Plot: Proportion of Resubmitting Population by Levels of Demographics
+
+```{r, fig.height = 12, fig.width = 12}
+theme_my_defaults <- function() {
+  theme(
+    text = element_text(family = "Frutiger LT Std"),
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"), # Center title, add space below
+    axis.title.x = element_text(size = 22, margin = margin(t = 15), face = "bold"), # Add space above x-axis title
+    axis.title.y = element_text(size = 22, margin = margin(r = 15), face = "bold"), # Add space to the right of y-axis title
+    # plot.margin = margin(t = 20, r = 10, b = 10, l = 10), # Add extra space around the plot
+    axis.text.x = element_text(size = 16, face = "bold"), # Make axis easier to read
+    axis.text.y = element_text(size = 16, face = "bold"),  # Make axis easier to read
+    plot.title.position = "plot",
+    panel.background = element_rect(fill = "white"),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18, face = "bold")
+  )
+}
+
+
+plot_colors <-
+  c(
+    "Male"= RSSred,      
+    "Female"= RSSblue,    
+    "UK"=col_uk,        
+    "Non UK"=col_nonuk,   
+    "Undisclosed Nationality" = RSSmidgrey,
+    "Known Disability"=col_dis   ,    
+    "No Known Disability"=col_nodis  ,   
+    "White"=col_white  ,   
+    "Ethnic Minority"=col_ethmin,
+    "56 and Over" = col_5665,
+    "36-55" = col_3645,
+    "35 and Under" = col_2635
+    
+  )
+
+df <- t1 %>% 
+  select(-Driver) %>% 
+  rename(Resubmission_Status = Year) 
+
+df <- df %>% mutate(
+  Demographic = case_when(
+  Demographic == "Not Disclosed" ~ "Undisclosed Nationality",
+  TRUE ~ Demographic
+))
+
+
+# Convert Group to a factor with a custom order
+df <- df %>%
+  mutate(Group = factor(Group, levels = c("AgeRangeCollapsed", "Disability", "EthnicityBinary", "NationalityBinary", "Sex")))
+
+# Reorder Demographic based on Group
+df <- df %>%
+  mutate(Demographic = fct_reorder(Demographic, as.numeric(Group)))
+
+
+
+### Calculate the baseline proportions in each group that receive at least one rejection, then add to df for plotting
+temp <- df %>% 
+  group_by(Group) %>% 
+  mutate(
+    total_group = sum(Count)
+  ) %>% 
+  ungroup() %>% 
+  group_by(Demographic) %>% 
+  mutate(
+    total_demographic = sum(Count)
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    Proportion = total_demographic / total_group,
+    Count = total_demographic,
+    Resubmission_Status = "(Baseline)",
+    CI_L = NA,
+    CI_U = NA
+  ) %>% 
+  ungroup() %>% 
+  select(-c(total_group, total_demographic))
+
+temp <- temp %>% distinct(Group, Demographic, .keep_all = TRUE)
+
+df <- rbind(df, temp)
+
+
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+
+fig8.01 <- ggplot(df, aes(x = Demographic, y = Proportion, color = Demographic, shape = Resubmission_Status)) +
+  geom_point(position = position_dodge(width = 1), size = 4) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+      position = position_dodge(width = 1), 
+      width = 0.5,
+      size = 1.2,
+      alpha = 0.5) +
+  # geom_text_repel(show.legend = FALSE,
+  #                 aes(label = scales::percent(Proportion, accuracy = 1)),
+  #                 position = position_dodge(width = 1), 
+  #                 vjust = -1, 
+  #                 size = 5,
+  #                 force = 2, # Adjust the force to control label repelling
+  #                 max.overlaps = Inf, # Prevents any labels from being removed
+  #                 box.padding = 0.7, # Adds padding around labels
+  #                 point.padding = 0.2) +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Proportions of Resubmitting and Non-resubmitting Populations\nby Demographic Group",
+       x = "Demographic",
+       y = "Proportion of Resubmitting or Non-resubmitting Population") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  coord_flip() + 
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE)) +
+  theme_my_defaults()
+
+
+fig8.01
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note08"
+
+ggsave(filename = paste0(figure_folder_path, "/dem_proportions_within_resub_pop.png"), 
+       plot = fig8.01, width = 12, height = 12, dpi = 800, bg = "white")
+
+```
+
+#### Table: Proportion of Resubmitting Population by Levels of Intersectional Demographics
+
+```{r}
+# Intersectional demographics
+## Removing unknown and not disclosed values
+df <- Q8data.df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed") %>% 
+  droplevels()
+
+
+df$Sex_Ethnicity <- interaction(df$Sex, df$EthnicityBinary)
+df$Sex_Age <- interaction(df$Sex, df$AgeRangeCollapsed)
+df$Ethnicity_Age <- interaction(df$EthnicityBinary, df$AgeRangeCollapsed)
+
+df$Sex_Ethnicity_Age <- interaction(df$Sex, df$EthnicityBinary, df$AgeRangeCollapsed)
+
+t1 <- compute_statistics(df, "Resubmission", "Sex_Ethnicity","")
+t2 <- compute_statistics(df, "Resubmission", "Sex_Age","")
+t3 <- compute_statistics(df, "Resubmission", "Ethnicity_Age","")
+
+t4 <- compute_statistics(df, "Resubmission", "Sex_Ethnicity_Age", "")
+
+
+intersections_table1 <- t1 %>% 
+  select(-Driver) %>% 
+  round_columns()
+  
+kable(intersections_table1)
+
+intersections_table2 <- t2 %>% 
+  select(-Driver) %>% 
+  round_columns()
+  
+kable(intersections_table2)
+
+intersections_table3 <- t3 %>% 
+  select(-Driver) %>% 
+  round_columns()
+
+kable(intersections_table3)
+
+intersections_table4 <- t4 %>% 
+  select(-Driver) %>% 
+  round_columns()
+  
+kable(intersections_table4)
+```
+
+#### Plot: Proportion of Resubmitting Population by Levels of Intersectional Demographics
+
+```{r, fig.height = 12, fig.width = 12}
+# Define custom colors
+plot_colors <-
+  c(
+    "Male.White"= RSSblue,      
+    "Female.White"= RSSred,
+    "Male.Ethnic Minority"=RSSlightblue,
+    "Female.Ethnic Minority"=RSSgold,     
+    "Female.35_and_Under"=RSSred   ,    
+    "Female.36-55"=RSSgold  ,   
+    "Female.56_and_Over"=RSSorange  ,   
+    "Male.35_and_Under"=RSSblue  ,  
+    "Male.36-55"=RSSviolet  , 
+    "Male.56 and Over"=RSSlightblue  ,
+    "White.35 and Under"=RSSblue ,
+    "White.36-55"=RSSviolet ,
+    "White.56 and Over"=RSSlightblue ,
+    "Ethnic Minority.35 and Under"=RSSred ,
+    "Ethnic Minority.36 55"=RSSgold ,
+    "Ethnic Minority.56 and Over"=RSSorange
+  )
+
+df1 <- t1 %>% 
+  select(-Driver) %>% 
+  rename(Resubmission_Status = Year) 
+
+df2 <- t2 %>% 
+  select(-Driver) %>% 
+  rename(Resubmission_Status = Year) 
+
+df3 <- t3 %>% 
+  select(-Driver) %>% 
+  rename(Resubmission_Status = Year) 
+
+df4 <- t4 %>% 
+  select(-Driver) %>% 
+  rename(Resubmission_Status = Year) 
+
+### Calculate the baseline proportions in each group that receive at least one rejection, then add to df4 for plotting
+temp <- df4 %>% 
+  group_by(Group) %>% 
+  mutate(
+    total_group = sum(Count)
+  ) %>% 
+  ungroup() %>% 
+  group_by(Demographic) %>% 
+  mutate(
+    total_demographic = sum(Count)
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    Proportion = total_demographic / total_group,
+    Count = total_demographic,
+    Resubmission_Status = "(Baseline)",
+    CI_L = NA,
+    CI_U = NA
+  ) %>% 
+  ungroup() %>% 
+  select(-c(total_group, total_demographic))
+
+temp <- temp %>% distinct(Group, Demographic, .keep_all = TRUE)
+
+df4 <- rbind(df4, temp)
+
+
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+
+intersections_fig1 <- ggplot(df1, aes(x = Demographic, y = Proportion, color = Demographic, shape = Resubmission_Status)) +
+  geom_point(position = position_dodge(width = 1), size = 4) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+      position = position_dodge(width = 1), 
+      width = 0.5,
+      size = 1.2,
+      alpha = 0.5) +
+  geom_text_repel(aes(label = scales::percent(Proportion, accuracy = 1)),
+                  position = position_dodge(width = 1), 
+                  vjust = -1, 
+                  size = 5,
+                  force = 2, # Adjust the force to control label repelling
+                  max.overlaps = Inf, # Prevents any labels from being removed
+                  box.padding = 0.7, # Adds padding around labels
+                  point.padding = 0.2) +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Proportions of Resubmitting and Non-resubmitting Populations\nby Demographic Group",
+       x = "Demographic",
+       y = "Proportion of Resubmitting or\nNon-resubmitting Population") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  coord_flip() +
+  theme_my_defaults() +
+  guides(color = "none")
+
+
+
+intersections_fig2 <- ggplot(df2, aes(x = Demographic, y = Proportion, color = Demographic, shape = Resubmission_Status)) +
+  geom_point(position = position_dodge(width = 1), size = 4) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+      position = position_dodge(width = 1), 
+      width = 0.5,
+      size = 1.2,
+      alpha = 0.5) +
+  geom_text_repel(aes(label = scales::percent(Proportion, accuracy = 1)),
+                  position = position_dodge(width = 1), 
+                  vjust = -1, 
+                  size = 5,
+                  force = 2, # Adjust the force to control label repelling
+                  max.overlaps = Inf, # Prevents any labels from being removed
+                  box.padding = 0.7, # Adds padding around labels
+                  point.padding = 0.2) +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Proportions of Resubmitting and Non-resubmitting Populations\nby Demographic Group",
+       x = "Demographic",
+       y = "Proportion of Resubmitting or\nNon-resubmitting Population") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  coord_flip() +
+  theme_my_defaults() +
+  guides(color = "none")
+
+
+intersections_fig3 <- ggplot(df3, aes(x = Demographic, y = Proportion, color = Demographic, shape = Resubmission_Status)) +
+  geom_point(position = position_dodge(width = 1), size = 4) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+      position = position_dodge(width = 1), 
+      width = 0.5,
+      size = 1.2,
+      alpha = 0.5) +
+  geom_text_repel(aes(label = scales::percent(Proportion, accuracy = 1)),
+                  position = position_dodge(width = 1), 
+                  vjust = -1, 
+                  size = 5,
+                  force = 2, # Adjust the force to control label repelling
+                  max.overlaps = Inf, # Prevents any labels from being removed
+                  box.padding = 0.7, # Adds padding around labels
+                  point.padding = 0.2) +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Proportions of Resubmitting and Non-resubmitting Populations\nby Demographic Group",
+       x = "Demographic",
+       y = "Proportion of Resubmitting or\nNon-resubmitting Population") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  coord_flip() +
+  theme_my_defaults() +
+  guides(color = "none")
+
+
+
+
+plot_colors <-
+  c(
+    "Male.White.56 and Over"= RSSblue,      
+    "Female.White.56 and Over"= RSSred,
+    "Male.Ethnic Minority.56 and Over"=RSSlightblue,
+    "Female.Ethnic Minority.56 and Over"=RSSgold, 
+    "Male.White.36-55"= RSSviolet,      
+    "Female.White.36-55"= RSSorange,
+    "Male.Ethnic Minority.36-55"= RSSgreen,
+    "Female.Ethnic Minority.36-55"=RSSdark, 
+    "Male.White.35 and Under"= RSSpurple,      
+    "Female.White.35 and Under"= RSStaupe,
+    "Male.Ethnic Minority.35 and Under"=RSSseablue,
+    "Female.Ethnic Minority.35 and Under"=RSSmint 
+  )
+
+intersections_fig4 <- ggplot(df4, aes(x = Demographic, y = Proportion, color = Demographic, shape = Resubmission_Status)) +
+  geom_point(position = position_dodge(width = 1), size = 4) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+      position = position_dodge(width = 1), 
+      width = 0.5,
+      size = 1.2,
+      alpha = 0.5) +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Proportions of Resubmitting and Non-resubmitting Populations\nby Demographic Group",
+       x = "Demographic",
+       y = "Proportion of Resubmitting or\nNon-resubmitting Population") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  coord_flip() +
+  theme(
+    text = element_text(family = "Frutiger LT Std"),
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    axis.title.x = element_text(size = 22, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 22, margin = margin(r = 15), face = "bold"),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    plot.title.position = "plot",
+    panel.background = element_rect(fill = "white"),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18, face = "bold"),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.direction = "horizontal",
+    legend.box = "vertical",
+    legend.box.just = "center"
+  ) +
+  guides(
+    color = "none",
+    shape = guide_legend(
+      reverse = TRUE,
+      title.position = "top",
+      label.position = "bottom",
+      title.hjust = 0.5,
+      label.hjust = 0.5
+    )
+  )
+
+
+print(intersections_fig1)
+print(intersections_fig2)
+print(intersections_fig3)
+print(intersections_fig4)
+
+
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note08"
+
+ggsave(filename = paste0(figure_folder_path, "/sex+ethnicity_proportions_within_resub_pop.png"),
+       plot = intersections_fig1, width = 12, height = 12, dpi = 600, bg = "white")
+
+ggsave(filename = paste0(figure_folder_path, "/sex+age_proportions_within_resub_pop.png"),
+       plot = intersections_fig2, width = 12, height = 12, dpi = 600, bg = "white")
+
+ggsave(filename = paste0(figure_folder_path, "/ethnicity+age_proportions_within_resub_pop.png"),
+       plot = intersections_fig3, width = 12, height = 12, dpi = 600, bg = "white")
+
+ggsave(filename = paste0(figure_folder_path, "/sex+ethnicity+age_proportions_within_resub_pop.png"),
+       plot = intersections_fig4, width = 12, height = 12, dpi = 600, bg = "white")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

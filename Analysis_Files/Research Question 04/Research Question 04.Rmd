@@ -1,0 +1,1929 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 4"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 6, warning = FALSE, messages = FALSE)
+
+## Libraries
+library(boot)
+library(tidyverse)
+library(kableExtra)
+library(scales)
+library(tibble)
+library(purrr)
+library(nortest)
+library(pscl)  # For pseudo-R^2
+library(betareg)  # For beta regression
+library(openxlsx)   # for saving tables as excel files
+# various regression-related packages
+library(performance)
+library(lmtest)
+library(jtools)
+library(sandwich)
+library(stargazer)
+library(car)
+library(lme4)
+library(gtExtras)
+
+
+
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/Note04"
+setwd("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/")
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+UKLFdata            <- "PROJ2023.002-DATA004.xlsx"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+## Define the RSS Colour palette
+
+RSSgold       <- "#D3A41B" # Female
+RSSblue       <- "#004B6D" # Male
+RSSred        <- "#cc0000" # Not Disclosed
+RSStaupe      <- "#a6a086" # Unknown
+RSSgreen      <- "#009933" # White
+RSSpurple     <- "#7879b9" # Non UK
+RSSdark       <- "#393f4d" # UK
+RSSlightblue  <- "#6db4c0" # Ethnic Minority
+RSSseablue    <- "#287fc3" # No Known Disability
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" # Known Disability
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_25andunder <- "#b6d6b3"
+col_2635 <- "#87bd00"
+col_3645 <- "#299907"
+col_4655 <- "#146f03"
+col_5665 <- "#054907"
+col_66 <- "#0f2808"
+col_white <- "#a7a7c1"
+col_chinese <- "#74749d"
+col_black <- "#1e3399"
+col_mixed <- "#090771"
+col_asian <- "#37163e"
+col_other <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+# {.tabset}
+
+## Data Preparation
+
+```{r data_prep_grants}
+## This dataframe will include Grant (rather than unique researcher)
+
+## 1.1 Select columns from Grants.df
+Grants_selected.df <- EPSRC$Grants.df %>%
+  select(AnonPROJ,
+         GrantCategory,
+         GrantOutcome,
+         AdjustedApplicationValue,
+         Driver,
+         AnonREG,
+         FYDecisionDate
+  )
+
+
+## 1.2 Now select additional columns from PrincipalInvestigators.df
+PI_details.df <- EPSRC$PI.df %>%
+  select(
+    AnonPROJ,
+    AnonINV,
+    Sex,
+    AgeRange,
+    Disability,
+    EthnicGroup,
+    EthnicityBinary,
+    NationalityBinary,
+    AnonTHM,
+    Role
+  )
+
+
+## 1.3 Merge with PrincipalInvestigators.df
+Q4Grants.df <- left_join(PI_details.df,
+                 Grants_selected.df ,
+                 by = "AnonPROJ"
+)
+
+
+## 1.4 Cleanup
+rm(PI_details.df, 
+   Grants_selected.df
+)
+
+## Add a binary Outcome variable for Funded/Unfunded
+Q4Grants.df$BinaryOutcome <- ifelse(Q4Grants.df$GrantOutcome == "Funded", "Funded", "Unfunded")
+
+Q4Grants.df <- Q4Grants.df %>% 
+  mutate(BinaryOutcome = factor(BinaryOutcome)) %>% 
+  mutate(BinaryOutcome = relevel(BinaryOutcome, ref = "Unfunded")) ## this coding ensures that the "success" category is "Funded" rather than "Unfunded"
+
+Q4Grants.df <- Q4Grants.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q4Grants.df$AgeRangeCollapsed <- factor(Q4Grants.df$AgeRangeCollapsed)
+
+
+
+# Create temp.df by grouping and filtering for the max RAFraction 
+temp.df <- EPSRC$ResearchAreas.df %>% 
+  group_by(AnonPROJ) %>% 
+  filter(RAFraction == max(RAFraction)) %>% 
+  ungroup() 
+
+# Perform a left join to merge dataframes 
+Q4Grants.df <- Q4Grants.df %>% 
+  left_join(temp.df %>% select(AnonPROJ, AnonRAG), by = "AnonPROJ") 
+
+# Remove temp.df from the environment 
+rm(temp.df) 
+
+```
+
+
+
+## Research Grants, Binary Funding Success
+
+```{r}
+df <- Q4Grants.df %>% filter(GrantCategory == "Research Grant") 
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRangeCollapsed == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRangeCollapsed == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+
+
+# Aligning the models with what was done in the pre-registered analysis for binary funding success
+
+model1 <- glmer(BinaryOutcome ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df,
+                     family = binomial(link = "logit"))
+
+model2 <- glmer(BinaryOutcome ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df,
+                     family = binomial(link = "logit"))
+
+
+lrt <- anova(model1, model2, test = "LRT")
+print(lrt)
+
+summary(model2)
+```
+
+```{r fig.height = 12, fig.width = 12}
+chosen_model <- model2
+
+check_model(chosen_model)
+```
+
+```{r rows.print = 40}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+coefficient_table <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+coefficient_table_exp <- exp(coefficient_table)
+
+# Rounding to make more readable
+coefficient_table_exp_rounded <- round(coefficient_table_exp, 3)
+
+coefficient_table_exp_rounded_df <- as.data.frame(coefficient_table_exp_rounded)
+
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+
+
+coefficient_table_exp_rounded_df <- coefficient_table_exp_rounded_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "SexUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityBinaryUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityBinaryNotDisclosed" ~ "Undisclosed Nationality",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityBinaryUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeRangeCollapsed56 and Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35 and Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Ethnic Minority Female",
+    Predictor == "SexFemale:AgeRangeCollapsed35 and Under" ~ "Female 35 or Younger",
+    Predictor == "SexFemale:AgeRangeCollapsed56 and Over" ~ "Female 56 or Older",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35 and Under" ~ "Ethnic Minority 35 or Younger",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56 and Over" ~ "Ethnic Minority 56 or Older",
+    TRUE ~ Predictor  
+  ))
+
+library(stringr)
+
+OR_Bin_table_for_report <- coefficient_table_exp_rounded_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(OR_Bin_table_for_report) <- NULL
+
+OR_Bin_table_for_report <- OR_Bin_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Odds_Ratio = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(OR_Bin_table_for_report) ### turn this into a table for the report
+```
+
+```{r}
+# Saving the table as an image
+gt_table <- gt(OR_Bin_table_for_report)
+
+gt_table <- gt_table %>%
+  tab_header(
+    title = md("**Mixed-Effects Model of Binary Funding Success Against Predictors, Research Grants**"),
+    subtitle = md("_Odds Ratios and 95% Confidence Intervals for Fixed-Effect Predictors_")
+  ) %>%
+  fmt_number(
+    columns = c(Predictor, Odds_Ratio, CI_Lower_Limit, CI_Upper_Limit), 
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Odds_Ratio = "Odds Ratio",
+    CI_Lower_Limit = "CI Lower Limit",
+    CI_Upper_Limit = "CI Upper Limit"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+      )
+  ) %>% 
+  tab_options(
+    table.font.size = px(14),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(12)
+  ) %>%
+  cols_align(
+    align = "left",  
+    columns = c(Predictor)  
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/Research_Grants_OR_Bin_table_for_report.png")
+
+```
+
+### Model Predictions
+
+```{r}
+newdata_bin = Q4Grants.df %>% filter(GrantCategory == "Research Grant" & 
+                                     !Sex == "Unknown" &
+                                     !EthnicityBinary == "Unknown" &
+                                     !NationalityBinary == "Unknown" &
+                                     !AgeRangeCollapsed == "Unknown" &
+                                     !Disability == "Unknown" &
+                                     !Sex == "Not Disclosed" &
+                                     !EthnicityBinary == "Not Disclosed" &
+                                     !AgeRangeCollapsed == "Not Disclosed" &
+                                     !Disability == "Not Disclosed") %>% select(Sex, EthnicityBinary, AgeRangeCollapsed, Disability, NationalityBinary, Driver, AnonRAG, AnonTHM, AnonREG, FYDecisionDate)
+newdata_bin <- na.omit(newdata_bin)
+
+
+# Change sex and ethnicity for all observations to desired groupings (all combinations of ethnicity and sex)
+newdata_binWM <- newdata_bin %>% mutate(EthnicityBinary = "White", Sex = "Male")
+newdata_binWF <- newdata_bin %>% mutate(EthnicityBinary = "White", Sex = "Female")
+newdata_binEM <- newdata_bin %>% mutate(EthnicityBinary = "Ethnic Minority", Sex = "Male")
+newdata_binEF <- newdata_bin %>% mutate(EthnicityBinary = "Ethnic Minority", Sex = "Female")
+
+# Get the predictions for each observation after the changes
+newdata_binWM$predicted <- predict(chosen_model, newdata_binWM, type = "response")
+newdata_binWF$predicted <- predict(chosen_model, newdata_binWF, type = "response")
+newdata_binEM$predicted <- predict(chosen_model, newdata_binEM, type = "response")
+newdata_binEF$predicted <- predict(chosen_model, newdata_binEF, type = "response")
+
+# Calculate the mean predictions
+outputs_binWM <- newdata_binWM %>% 
+  group_by(Sex, EthnicityBinary) %>% 
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binWF <- newdata_binWF %>% 
+  group_by(Sex, EthnicityBinary) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binEM <- newdata_binEM %>% 
+  group_by(Sex, EthnicityBinary) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binEF <- newdata_binEF %>% 
+  group_by(Sex, EthnicityBinary) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_bin_newmethod <- rbind(outputs_binWM, outputs_binWF, outputs_binEM, outputs_binEF)
+
+outputs_bin_newmethod
+```
+
+```{r}
+# Saving the table as an image
+outputs_bin_newmethod <- outputs_bin_newmethod %>%
+  filter(Sex != "Unknown", EthnicityBinary != "Unknown") %>%
+  mutate(SexEthnicity = paste(Sex, EthnicityBinary, sep = ", ")) %>%  # Combine Sex and Ethnicity
+  select(SexEthnicity, mean_pred) %>%                  # Rearrange columns
+  group_by(SexEthnicity) %>%
+  mutate(SexEthnicity = if_else(row_number() == 1, SexEthnicity, "")) %>%  # Blank duplicate rows
+  ungroup()
+
+outputs_bin_newmethod <- outputs_bin_newmethod %>% select(-c(Sex))
+
+# Step 2: Create the gt table
+gt_table <- gt(outputs_bin_newmethod) %>%
+  tab_header(
+    title = md("**Average Predicted Probabilities of Funding Success\nfor Research Grants, Selected Demographics**"),
+    subtitle = md("_Average Predictions Based on Mixed-Effects Model for Binary Funding Success_")
+  ) %>%
+  fmt_percent(
+    columns = c(mean_pred), 
+    decimals = 1
+  ) %>%
+  cols_label(
+    SexEthnicity = "Sex and Ethnicity",
+    mean_pred = "Mean Prediction"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+    )
+  ) %>% 
+  tab_options(
+    table.font.size = px(14),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(12)
+  ) %>%
+  cols_align(
+    align = "left",  
+    columns = c(SexEthnicity)  # Left-align Sex/Ethnicity 
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/NEWMETHOD_Funding_Success_Predictions_Research_Grants.png")
+
+```
+
+
+
+
+
+## Fellowships, Binary Funding Success
+
+```{r}
+df <- Q4Grants.df %>% filter(GrantCategory == "Fellowship") 
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRangeCollapsed == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRangeCollapsed == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+
+
+# Aligning the models with what was done in the pre-registered analysis for binary funding success
+
+model1 <- glmer(BinaryOutcome ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df,
+                     family = binomial(link = "logit"))
+
+model2 <- glmer(BinaryOutcome ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df,
+                     family = binomial(link = "logit"))
+
+
+lrt <- anova(model1, model2, test = "LRT")
+print(lrt)
+
+summary(model1)
+```
+
+```{r fig.height = 12, fig.width = 12}
+chosen_model <- model1
+
+check_model(chosen_model)
+```
+
+```{r rows.print = 40}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+coefficient_table <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+coefficient_table_exp <- exp(coefficient_table)
+
+# Rounding to make more readable
+coefficient_table_exp_rounded <- round(coefficient_table_exp, 3)
+
+coefficient_table_exp_rounded_df <- as.data.frame(coefficient_table_exp_rounded)
+
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+
+
+coefficient_table_exp_rounded_df <- coefficient_table_exp_rounded_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "SexUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityBinaryUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityBinaryNotDisclosed" ~ "Undisclosed Nationality",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityBinaryUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeRangeCollapsed56 and Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35 and Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Ethnic Minority Female",
+    Predictor == "SexFemale:AgeRangeCollapsed35 and Under" ~ "Female 35 or Younger",
+    Predictor == "SexFemale:AgeRangeCollapsed56 and Over" ~ "Female 56 or Older",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35 and Under" ~ "Ethnic Minority 35 or Younger",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56 and Over" ~ "Ethnic Minority 56 or Older",
+    TRUE ~ Predictor  
+  ))
+
+library(stringr)
+
+OR_Bin_table_for_report <- coefficient_table_exp_rounded_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(OR_Bin_table_for_report) <- NULL
+
+OR_Bin_table_for_report <- OR_Bin_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Odds_Ratio = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(OR_Bin_table_for_report) ### turn this into a table for the report
+```
+
+```{r}
+# Saving the table as an image
+gt_table <- gt(OR_Bin_table_for_report)
+
+gt_table <- gt_table %>%
+  tab_header(
+    title = md("**Mixed-Effects Model of Binary Funding Success Against Predictors, Fellowships**"),
+    subtitle = md("_Odds Ratios and 95% Confidence Intervals for Fixed-Effect Predictors_")
+  ) %>%
+  fmt_number(
+    columns = c(Predictor, Odds_Ratio, CI_Lower_Limit, CI_Upper_Limit), 
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Odds_Ratio = "Odds Ratio",
+    CI_Lower_Limit = "CI Lower Limit",
+    CI_Upper_Limit = "CI Upper Limit"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+      )
+  ) %>% 
+  tab_options(
+    table.font.size = px(14),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(12)
+  ) %>%
+  cols_align(
+    align = "left",  
+    columns = c(Predictor)  
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/Fellowships_OR_Bin_table_for_report.png")
+
+```
+
+
+### Model Predictions
+
+```{r}
+newdata_bin = Q4Grants.df %>% filter(GrantCategory == "Fellowship" & 
+                                     !Sex == "Unknown" &
+                                     !EthnicityBinary == "Unknown" &
+                                     !NationalityBinary == "Unknown" &
+                                     !AgeRangeCollapsed == "Unknown" &
+                                     !Disability == "Unknown" &
+                                     !Sex == "Not Disclosed" &
+                                     !EthnicityBinary == "Not Disclosed" &
+                                     !AgeRangeCollapsed == "Not Disclosed" &
+                                     !Disability == "Not Disclosed") %>% select(Sex, EthnicityBinary, AgeRangeCollapsed, Disability, NationalityBinary, Driver, AnonRAG, AnonTHM, AnonREG, FYDecisionDate)
+newdata_bin <- na.omit(newdata_bin)
+
+
+# Change sex and ethnicity for all observations to desired groupings (all combinations of ethnicity and sex)
+newdata_binWM <- newdata_bin %>% mutate(EthnicityBinary = "White", Sex = "Male")
+newdata_binWF <- newdata_bin %>% mutate(EthnicityBinary = "White", Sex = "Female")
+newdata_binEM <- newdata_bin %>% mutate(EthnicityBinary = "Ethnic Minority", Sex = "Male")
+newdata_binEF <- newdata_bin %>% mutate(EthnicityBinary = "Ethnic Minority", Sex = "Female")
+
+# Get the predictions for each observation after the changes
+newdata_binWM$predicted <- predict(chosen_model, newdata_binWM, type = "response")
+newdata_binWF$predicted <- predict(chosen_model, newdata_binWF, type = "response")
+newdata_binEM$predicted <- predict(chosen_model, newdata_binEM, type = "response")
+newdata_binEF$predicted <- predict(chosen_model, newdata_binEF, type = "response")
+
+# Calculate the mean predictions
+outputs_binWM <- newdata_binWM %>% 
+  group_by(Sex, EthnicityBinary) %>% 
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binWF <- newdata_binWF %>% 
+  group_by(Sex, EthnicityBinary) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binEM <- newdata_binEM %>% 
+  group_by(Sex, EthnicityBinary) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binEF <- newdata_binEF %>% 
+  group_by(Sex, EthnicityBinary) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_bin_newmethod <- rbind(outputs_binWM, outputs_binWF, outputs_binEM, outputs_binEF)
+
+outputs_bin_newmethod
+```
+
+```{r}
+# Saving the table as an image
+outputs_bin_newmethod <- outputs_bin_newmethod %>%
+  filter(Sex != "Unknown", EthnicityBinary != "Unknown") %>%
+  mutate(SexEthnicity = paste(Sex, EthnicityBinary, sep = ", ")) %>%  # Combine Sex and Ethnicity
+  select(SexEthnicity, mean_pred) %>%                  # Rearrange columns
+  group_by(SexEthnicity) %>%
+  mutate(SexEthnicity = if_else(row_number() == 1, SexEthnicity, "")) %>%  # Blank duplicate rows
+  ungroup()
+
+outputs_bin_newmethod <- outputs_bin_newmethod %>% select(-c(Sex))
+
+# Step 2: Create the gt table
+gt_table <- gt(outputs_bin_newmethod) %>%
+  tab_header(
+    title = md("**Average Predicted Probabilities of Funding Success\nfor Fellowships, Selected Demographics**"),
+    subtitle = md("_Average Predictions Based on Mixed-Effects Model for Binary Funding Success_")
+  ) %>%
+  fmt_percent(
+    columns = c(mean_pred), 
+    decimals = 1
+  ) %>%
+  cols_label(
+    SexEthnicity = "Sex and Ethnicity",
+    mean_pred = "Mean Prediction"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+    )
+  ) %>% 
+  tab_options(
+    table.font.size = px(14),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(12)
+  ) %>%
+  cols_align(
+    align = "left",  
+    columns = c(SexEthnicity)  # Left-align Sex/Ethnicity 
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/NEWMETHOD_Funding_Success_Predictions_Fellowships.png")
+
+```
+
+
+
+
+## Award Value Regression Models
+
+### Application Level - Research Grants
+
+```{r}
+## Testing whether there is association between demographics and binary outcome of a successful grant being above or below £2.5million.
+
+df <- Q4Grants.df %>% filter(GrantCategory == "Research Grant", BinaryOutcome == "Funded", AdjustedApplicationValue > 0) 
+
+df <- df %>% mutate(
+  Above_2.5m = case_when(
+    AdjustedApplicationValue >= 2.5 ~ "Above 2.5 Million",
+    TRUE ~ "Below 2.5 Million"
+  )
+)
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRangeCollapsed == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRangeCollapsed == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+df$Above_2.5m <- factor(df$Above_2.5m)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+df$Above_2.5m <- relevel(df$Above_2.5m, ref = "Below 2.5 Million")
+
+
+threshold_check_model <- glm(Above_2.5m ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability, 
+              data = df,
+              family = binomial(link = "logit"))
+
+#View model
+threshold_check_model
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcovHC(threshold_check_model, type = "HC3")))
+
+# table of estimates with 95% CI
+tab <- cbind(Est = coef(threshold_check_model), LL = coef(threshold_check_model) - 1.96 * se, UL = coef(threshold_check_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+tab_exp <- exp(tab)
+
+# Rounding to make more readable
+tab_exp_rounded <- round(tab_exp, 4)
+
+tab_exp_df <- as.data.frame(tab_exp_rounded)
+
+print(tab_exp_df)
+
+```
+
+
+```{r}
+# Aligning the models for award value with what was done in the pre-registered analysis for binary funding success and TopQuartile panel ranking.
+
+model1 <- lmer( AdjustedApplicationValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+model2 <- lmer(log(AdjustedApplicationValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + 
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+model3 <- lmer( AdjustedApplicationValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+model4 <- lmer(log(AdjustedApplicationValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+
+# Create a dataframe to compare models
+model_comparison <- data.frame(
+  Model = c(
+    "Linear Model",
+    "Linear Model Log - Transformed",
+    "Linear Model w/ interactions",
+    "Linear Model w/ interactions Log - Transformed"
+  ),
+  
+  AIC = c(
+    AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model4)
+  ),
+  
+  BIC = c(
+    BIC(model1),
+    BIC(model2),
+    BIC(model3),
+    BIC(model4) 
+  )
+
+)
+
+table4.19 <- model_comparison
+
+table4.19
+
+lrtest(model1, model3)
+lrtest(model2, model4)
+
+```
+
+```{r fig.height = 12, fig.width = 12}
+chosen_model <- model2
+
+plot(chosen_model)
+check_model(chosen_model)  
+```
+
+Base output from model
+```{r}
+summary(chosen_model)
+```
+
+Exponentiating coefficients and CIs because chosen model has a log-transformed dependent variable - these coefficients should be multiplicative effects, not additive
+```{r}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+coefficient_table <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+# exponentiating for interpretability - should be read multiplicatively, not additively after this
+coefficient_table_exp <- exp(coefficient_table)
+
+# Rounding to make more readable
+coefficient_table_exp_rounded <- round(coefficient_table_exp, 9)
+
+coefficient_table_exp_rounded_df <- as.data.frame(coefficient_table_exp_rounded)
+
+print(coefficient_table_exp_rounded_df)
+```
+
+
+```{r}
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+
+
+coefficient_table_exp_rounded_df <- coefficient_table_exp_rounded_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "GrantCategoryResearch Grant" ~ "Research Grant",
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "SexUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityBinaryUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityBinaryUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    TRUE ~ Predictor  
+  ))
+
+library(stringr)
+
+Apps_Grants_table_for_report <- coefficient_table_exp_rounded_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(Apps_Grants_table_for_report) <- NULL
+
+Apps_Grants_table_for_report <- Apps_Grants_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Effect = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(Apps_Grants_table_for_report) ### turn this into a table for the report
+```
+
+```{r}
+# Saving the table as an image
+gt_table <- gt(Apps_Grants_table_for_report)
+
+gt_table <- gt_table %>%
+  tab_header(
+    title = md("**Mixed-Effects Model of Award Value Against Predictors**"),
+    subtitle = md("_Exponentiated Coefficients and 95% CI (Research Grants, Application Level)_")
+  ) %>%
+  fmt_number(
+    columns = c(Effect, CI_Lower_Limit, CI_Upper_Limit), 
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Effect = "Effect (multiplicative)",
+    CI_Lower_Limit = "CI Lower Limit",
+    CI_Upper_Limit = "CI Upper Limit"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+      )
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/Apps_Grants_table_for_report.png")
+
+```
+
+
+
+
+### Application Level - Fellowships
+
+```{r}
+## Testing whether there is association between demographics and binary outcome of a successful grant being above or below £2.5million.
+
+df <- Q4Grants.df %>% filter(GrantCategory == "Fellowship", BinaryOutcome == "Funded", AdjustedApplicationValue > 0) 
+
+df <- df %>% mutate(
+  Above_2.5m = case_when(
+    AdjustedApplicationValue >= 2.5 ~ "Above 2.5 Million",
+    TRUE ~ "Below 2.5 Million"
+  )
+)
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+df$Above_2.5m <- factor(df$Above_2.5m)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+df$Above_2.5m <- relevel(df$Above_2.5m, ref = "Below 2.5 Million")
+
+
+threshold_check_model <- glm(Above_2.5m ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability, 
+              data = df,
+              family = binomial(link = "logit"))
+
+#View model
+threshold_check_model
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcovHC(threshold_check_model, type = "HC3")))
+
+# table of estimates with 95% CI
+tab <- cbind(Est = coef(threshold_check_model), LL = coef(threshold_check_model) - 1.96 * se, UL = coef(threshold_check_model) + 1.96 *se)
+
+# exponentiating to get odds ratios
+tab_exp <- exp(tab)
+
+# Rounding to make more readable
+tab_exp_rounded <- round(tab_exp, 9)
+
+tab_exp_df <- as.data.frame(tab_exp_rounded)
+
+print(tab_exp_df)
+
+```
+
+
+```{r}
+# Aligning the models for award value with what was done in the pre-registered analysis for binary funding success and TopQuartile panel ranking.
+
+model1 <- lmer( AdjustedApplicationValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+model2 <- lmer(log(AdjustedApplicationValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + 
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+model3 <- lmer( AdjustedApplicationValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+model4 <- lmer(log(AdjustedApplicationValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Driver + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | AnonTHM) +
+                       (1 | FYDecisionDate),
+                     data = df)
+
+
+# Create a dataframe to compare models
+model_comparison <- data.frame(
+  Model = c(
+    "Linear Model",
+    "Linear Model Log - Transformed",
+    "Linear Model w/ interactions",
+    "Linear Model w/ interactions Log - Transformed"
+  ),
+  
+  AIC = c(
+    AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model4)
+  ),
+  
+  BIC = c(
+    BIC(model1),
+    BIC(model2),
+    BIC(model3),
+    BIC(model4) 
+  )
+
+)
+
+table4.19 <- model_comparison
+
+table4.19
+
+lrtest(model1, model3)
+lrtest(model2, model4)
+
+```
+
+
+```{r, fig.height = 12, fig.width = 12}
+chosen_model <- model1
+
+plot(chosen_model)
+check_model(chosen_model)  
+```
+
+```{r}
+summary(chosen_model) # no need to transform this as the chosen model was the simple linear model without a log transformed dependent variable
+```
+
+
+```{r}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# Table of estimates with 95% CI
+coefficient_table <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 * se) 
+
+# Convert matrix to data frame
+coefficient_table <- as.data.frame(coefficient_table)
+
+# Add row names as a new column
+coefficient_table$Predictor <- row.names(coefficient_table)
+
+# Reset row names (optional, for a cleaner table)
+row.names(coefficient_table) <- NULL
+
+# Rounding to make more readable
+coefficient_table <- coefficient_table %>%
+  mutate(across(c(Est, LL, UL), ~ round(.x, 3)))
+
+
+coefficient_table <- coefficient_table %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "GrantCategoryResearch Grant" ~ "Research Grant",
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "SexUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityBinaryUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityBinaryUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    TRUE ~ Predictor 
+  ))
+
+library(stringr)
+
+Apps_Fellows_table_for_report <- coefficient_table %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(Apps_Fellows_table_for_report) <- NULL
+
+Apps_Fellows_table_for_report <- Apps_Fellows_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Effect = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(Apps_Fellows_table_for_report) ### turn this into a table for the report
+```
+
+```{r}
+# Saving the table as an image
+gt_table <- gt(Apps_Fellows_table_for_report)
+
+gt_table <- gt_table %>%
+  tab_header(
+    title = md("**Mixed-Effects Model of Award Value Against Predictors**"),
+    subtitle = md("_Estimated Coefficients and 95% CI (Fellowships, Application Level)_")
+  ) %>%
+  fmt_number(
+    columns = c(Effect, CI_Lower_Limit, CI_Upper_Limit), 
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Effect = "Effect",
+    CI_Lower_Limit = "CI Lower Limit",
+    CI_Upper_Limit = "CI Upper Limit"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+      )
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/Apps_Fellows_table_for_report.png")
+
+```
+
+
+
+
+### Individual Level
+
+```{r data_prep_unique}
+# All -------------------------------------------------------------------
+# Create df of both Fellows and PIs
+# 2.2 Select required columns and filter unique AnonINV
+UniqueAward.df<- EPSRC$PI.df %>%
+  select(Role, Sex, EthnicityBinary, EthnicGroup, AgeRange, Disability, NationalityBinary, AnonINV, FYDecisionDate) %>%
+  group_by(AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%
+  ungroup()
+
+
+# 2.3 Address duplicates where people jump an age bracket within a year
+# 2.1 Create Intermediate.df with rows where AnonINV appears more than once within and Role group
+Intermediate.df <- UniqueAward.df%>%
+  select( AgeRange, AnonINV) %>%
+  distinct()
+
+# 2.2 Add a new column 'AgeMax' by extracting the first two characters of 'AgeRange' and converting them to numeric
+Intermediate.df <- Intermediate.df %>%
+  mutate(AgeMax = as.numeric(substr(AgeRange, 1, 2)))
+
+# 2.3 For each AnonINV, keep only the row with the highest AgeMax (i.e. the highest age they reached in the sample), then drop that column
+Intermediate.df <- Intermediate.df %>%
+  group_by(AnonINV) %>%
+  filter(AgeMax == max(AgeMax)) %>%
+  ungroup() %>%
+  select(-AgeMax)
+
+# 2.4 Remove rows in UniqueInvestigators.df that don't match exactly with a row in Intermediate.df
+UniqueAward.df<- UniqueAward.df%>%
+  inner_join(Intermediate.df, by = c("AgeRange", "AnonINV"))
+
+# 2.5 Delete Intermediate.df by removing it from the environment
+rm(Intermediate.df)
+
+#Add Award Rate to Unique
+
+# Step 1: Count total projects applied per AnonINV
+ProjectsApplied <- EPSRC$PI.df %>%
+  group_by(AnonINV) %>%
+  summarise(AllProjectsApplied = n(), .groups = 'drop')
+
+# Step 2: Count funded projects per AnonINV, defaulting to 0 if none are funded
+ProjectsFunded <- EPSRC$PI.df %>%
+  group_by(AnonINV) %>%
+  summarise(AllProjectsFunded = sum(GrantOutcome == "Funded"), .groups = 'drop')
+
+# Merge everything into UniqueAward.df
+UniqueAward.df<- UniqueAward.df%>%
+  left_join(ProjectsApplied, by = "AnonINV") %>%
+  left_join(ProjectsFunded, by = "AnonINV") %>%
+  mutate(AllAwardRate = AllProjectsFunded / AllProjectsApplied)
+
+# Add Average Award Value
+
+# Step 1: Calculate the sum of AdjustedApplicationValue for each AnonINV
+summed_values <- EPSRC$PI.df %>% filter(GrantOutcome=="Funded") %>%
+  select(AnonINV, AdjustedApplicationValue) %>%
+  group_by(AnonINV) %>%
+  summarise(
+    AllValueSum = sum(AdjustedApplicationValue, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Step 2: Join the summed values to UniqueAward.df
+UniqueAward.df<- UniqueAward.df%>%
+  left_join(summed_values, by = "AnonINV")
+
+# Step 3: Calculate average
+
+UniqueAward.df$AllAveAwardValue <- UniqueAward.df$AllValueSum/UniqueAward.df$AllProjectsFunded
+# Replace NA with 0 in specified columns
+UniqueAward.df<- UniqueAward.df%>%
+  mutate_at(vars(one_of(c("AllValueSum", "AllAveAwardValue"))), ~ replace(., is.na(.), 0))
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+UniqueAward.df <- UniqueAward.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+UniqueAward.df$AgeRangeCollapsed <- factor(UniqueAward.df$AgeRangeCollapsed)
+
+
+# Fellows -------------------------------------------------------------------
+# Create df of just fellows
+# 2.2 Select required columns and filter unique AnonINV
+
+df <- EPSRC$PI.df %>% filter(GrantCategory=="Fellowship") 
+
+UniqueFellows.df<- df %>%
+  select(Role, Sex, EthnicityBinary, EthnicGroup, AgeRange, Disability, NationalityBinary, AnonINV, FYDecisionDate) %>%
+  group_by(AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%
+  ungroup()
+
+
+# 2.3 Address duplicates where people jump an age bracket within a year
+# 2.1 Create Intermediate.df with rows where AnonINV appears more than once within and Role group
+Intermediate.df <- UniqueFellows.df%>%
+  select( AgeRange, AnonINV) %>%
+  distinct()
+
+# 2.2 Add a new column 'AgeMax' by extracting the first two characters of 'AgeRange' and converting them to numeric
+Intermediate.df <- Intermediate.df %>%
+  mutate(AgeMax = as.numeric(substr(AgeRange, 1, 2)))
+
+# 2.3 For each AnonINV, keep only the row with the highest AgeMax (i.e. the highest age they reached in the sample), then drop that column
+Intermediate.df <- Intermediate.df %>%
+  group_by(AnonINV) %>%
+  filter(AgeMax == max(AgeMax)) %>%
+  ungroup() %>%
+  select(-AgeMax)
+
+# 2.4 Remove rows in UniqueInvestigators.df that don't match exactly with a row in Intermediate.df
+UniqueFellows.df <- UniqueFellows.df %>%
+  inner_join(Intermediate.df, by = c("AgeRange", "AnonINV"))
+
+# 2.5 Delete Intermediate.df by removing it from the environment
+rm(Intermediate.df)
+
+#Add Award Rate to Unique
+
+# Step 1: Count total projects applied per AnonINV
+ProjectsApplied <- df%>%
+  group_by(AnonINV) %>%
+  summarise(FelProjectsApplied = n(), .groups = 'drop')
+
+# Step 2: Count funded projects per AnonINV, defaulting to 0 if none are funded
+ProjectsFunded <- df%>%
+  group_by(AnonINV) %>%
+  summarise(FelProjectsFunded = sum(GrantOutcome == "Funded"), .groups = 'drop')
+
+# Merge everything into UniqueAward.df
+UniqueFellows.df <- UniqueFellows.df %>%
+  left_join(ProjectsApplied, by = "AnonINV") %>%
+  left_join(ProjectsFunded, by = "AnonINV") %>%
+  mutate(FelAwardRate = FelProjectsFunded / FelProjectsApplied)
+
+# Add Average Award Value
+
+# Step 1: Calculate the sum of AdjustedApplicationValue for each AnonINV
+summed_values <- df%>% filter(GrantOutcome=="Funded") %>%
+  select(AnonINV, AdjustedApplicationValue) %>%
+  group_by(AnonINV) %>%
+  summarise(
+    FelValueSum = sum(AdjustedApplicationValue, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Step 2: Join the summed values to UniqueAward.df
+UniqueFellows.df <- UniqueFellows.df %>%
+  left_join(summed_values, by = "AnonINV")
+
+# Step 3: Calculate average
+
+UniqueFellows.df$FelAveAwardValue <- UniqueFellows.df$FelValueSum/UniqueFellows.df$FelProjectsFunded
+# Replace NA with 0 in specified columns
+UniqueFellows.df <- UniqueFellows.df %>%
+  mutate_at(vars(one_of(c("FelValueSum", "FelAveAwardValue"))), ~ replace(., is.na(.), 0))
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+UniqueFellows.df <- UniqueFellows.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+UniqueFellows.df$AgeRangeCollapsed <- factor(UniqueFellows.df$AgeRangeCollapsed)
+
+
+# Research Grants -------------------------------------------------------------------
+# Create df of just PIs
+# 2.2 Select required columns and filter unique AnonINV
+
+df <- EPSRC$PI.df %>% filter(GrantCategory=="Research Grant") 
+
+UniqueGrantPIs.df<- df %>%
+  select(Role, EthnicGroup, AgeRange, Disability, NationalityBinary, AnonINV, Sex, EthnicityBinary, FYDecisionDate) %>%
+  group_by(AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%
+  ungroup()
+
+
+# 2.3 Address duplicates where people jump an age bracket within a year
+# 2.1 Create Intermediate.df with rows where AnonINV appears more than once within and Role group
+Intermediate.df <- EPSRC$PI.df%>%
+  select( AgeRange, AnonINV) %>%
+  distinct()
+
+# 2.2 Add a new column 'AgeMax' by extracting the first two characters of 'AgeRange' and converting them to numeric
+Intermediate.df <- Intermediate.df %>%
+  mutate(AgeMax = as.numeric(substr(AgeRange, 1, 2)))
+
+# 2.3 For each AnonINV, keep only the row with the highest AgeMax (i.e. the highest age they reached in the sample), then drop that column
+Intermediate.df <- Intermediate.df %>%
+  group_by(AnonINV) %>%
+  filter(AgeMax == max(AgeMax)) %>%
+  ungroup() %>%
+  select(-AgeMax)
+
+# 2.4 Remove rows in UniqueInvestigators.df that don't match exactly with a row in Intermediate.df
+UniqueGrantPIs.df <- UniqueGrantPIs.df %>%
+  inner_join(Intermediate.df, by = c("AgeRange", "AnonINV"))
+
+# 2.5 Delete Intermediate.df by removing it from the environment
+rm(Intermediate.df)
+
+#Add Award Rate to Unique
+
+# Step 1: Count total projects applied per AnonINV
+ProjectsApplied <- df%>%
+  group_by(AnonINV) %>%
+  summarise(PIProjectsApplied = n(), .groups = 'drop')
+
+# Step 2: Count funded projects per AnonINV, defaulting to 0 if none are funded
+ProjectsFunded <- df%>%
+  group_by(AnonINV) %>%
+  summarise(PIProjectsFunded = sum(GrantOutcome == "Funded"), .groups = 'drop')
+
+# Merge everything into UniqueAward.df
+UniqueGrantPIs.df <- UniqueGrantPIs.df %>%
+  left_join(ProjectsApplied, by = "AnonINV") %>%
+  left_join(ProjectsFunded, by = "AnonINV") %>%
+  mutate(PIAwardRate = PIProjectsFunded / PIProjectsApplied)
+
+# Add Average Award Value
+
+# Step 1: Calculate the sum of AdjustedApplicationValue for each AnonINV
+summed_values <- df%>% filter(GrantOutcome=="Funded") %>%
+  select(AnonINV, AdjustedApplicationValue) %>%
+  group_by(AnonINV) %>%
+  summarise(
+    PIValueSum = sum(AdjustedApplicationValue, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Step 2: Join the summed values to UniqueAward.df
+UniqueGrantPIs.df <- UniqueGrantPIs.df %>%
+  left_join(summed_values, by = "AnonINV")
+
+# Step 3: Calculate average
+
+UniqueGrantPIs.df$PIAveAwardValue <- UniqueGrantPIs.df$PIValueSum/UniqueGrantPIs.df$PIProjectsFunded
+# Replace NA with 0 in specified columns
+UniqueGrantPIs.df <- UniqueGrantPIs.df %>%
+  mutate_at(vars(one_of(c("PIValueSum", "PIAveAwardValue"))), ~ replace(., is.na(.), 0))
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+UniqueGrantPIs.df <- UniqueGrantPIs.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+UniqueGrantPIs.df$AgeRangeCollapsed <- factor(UniqueGrantPIs.df$AgeRangeCollapsed)
+
+
+
+# Combine and clean up --------------------------------------------------
+
+# Join UniqueAward.dfwith df3 on ANonINV and select specific columns from df3
+UniqueAward.df<- UniqueAward.df%>%
+  left_join(UniqueFellows.df %>% select(AnonINV, FelProjectsFunded, FelProjectsApplied, FelAwardRate, FelValueSum, FelAveAwardValue), by = "AnonINV")
+
+# Join the above result with df4 on ANonINV and select specific columns from df4
+UniqueAward.df<- UniqueAward.df%>%
+  left_join(UniqueGrantPIs.df %>% select(AnonINV, PIProjectsFunded, PIProjectsApplied, PIAwardRate, PIValueSum, PIAveAwardValue), by = "AnonINV")
+
+#Change NAs to 0
+UniqueAward.df[] <- lapply(UniqueAward.df, function(x) replace(x, is.na(x), 0))
+
+```
+
+
+
+
+### Individual Level: Research Grants
+
+```{r}
+## Testing whether there is association between demographics and binary outcome of a successful grant being above or below £2.5million.
+
+df <- UniqueGrantPIs.df %>% filter(PIAveAwardValue > 0) 
+
+df <- df %>% mutate(
+  Above_2.5m = case_when(
+    PIAveAwardValue >= 2.5 ~ "Above 2.5 Million",
+    TRUE ~ "Below 2.5 Million"
+  )
+)
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+
+df$Above_2.5m <- factor(df$Above_2.5m)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+df$Above_2.5m <- relevel(df$Above_2.5m, ref = "Below 2.5 Million")
+
+
+threshold_check_model <- glm(Above_2.5m ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability, 
+              data = df,
+              family = binomial(link = "logit"))
+
+#View model
+threshold_check_model
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcovHC(threshold_check_model, type = "HC3")))
+
+# table of estimates with 95% CI
+tab <- cbind(Est = coef(threshold_check_model), LL = coef(threshold_check_model) - 1.96 * se, UL = coef(threshold_check_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+tab_exp <- exp(tab)
+
+# Rounding to make more readable
+tab_exp_rounded <- round(tab_exp, 4)
+
+tab_exp_df <- as.data.frame(tab_exp_rounded)
+
+print(tab_exp_df)
+
+```
+
+
+```{r}
+model1 <- lm( PIAveAwardValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability, 
+                     data = df)
+
+model2 <- lm(log(PIAveAwardValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability,
+                     data = df)
+
+model3 <- lm( PIAveAwardValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed, 
+                     data = df)
+
+model4 <- lm(log(PIAveAwardValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed, 
+                     data = df)
+
+
+# Create a dataframe to compare models
+model_comparison <- data.frame(
+  Model = c(
+    "Linear Model",
+    "Linear Model Log - Transformed",
+    "Linear Model w/ interactions",
+    "Linear Model w/ interactions Log - Transformed"
+  ),
+  
+  AIC = c(
+    AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model4)
+  ),
+  
+  BIC = c(
+    BIC(model1),
+    BIC(model2),
+    BIC(model3),
+    BIC(model4) 
+  )
+
+)
+
+table4.19 <- model_comparison
+
+table4.19
+
+lrtest(model1, model3)
+lrtest(model2, model4)
+
+```
+
+```{r fig.height = 12, fig.width = 12}
+chosen_model <- model2
+
+plot(chosen_model)
+check_model(chosen_model)  
+```
+
+Base output from model
+```{r}
+summary(chosen_model)
+```
+
+Exponentiating coefficients and CIs because chosen model has a log-transformed dependent variable - these coefficients should be multiplicative effects, not additive
+```{r}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+coefficient_table <- cbind(Est = coef(chosen_model), LL = coef(chosen_model) - 1.96 * se, UL = coef(chosen_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+coefficient_table_exp <- exp(coefficient_table)
+
+# Rounding to make more readable
+coefficient_table_exp_rounded <- round(coefficient_table_exp, 3)
+
+coefficient_table_exp_rounded_df <- as.data.frame(coefficient_table_exp_rounded)
+
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+```
+
+
+```{r}
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+
+
+coefficient_table_exp_rounded_df <- coefficient_table_exp_rounded_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "GrantCategoryResearch Grant" ~ "Research Grant",
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "SexUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityBinaryUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityBinaryUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    TRUE ~ Predictor 
+  ))
+
+library(stringr)
+
+Individuals_Grants_table_for_report <- coefficient_table_exp_rounded_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(Individuals_Grants_table_for_report) <- NULL
+
+Individuals_Grants_table_for_report <- Individuals_Grants_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Effect = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(Individuals_Grants_table_for_report) ### turn this into a table for the report
+```
+
+```{r}
+# Saving the table as an image
+gt_table <- gt(Individuals_Grants_table_for_report)
+
+gt_table <- gt_table %>%
+  tab_header(
+    title = md("**Mixed-Effects Model of Award Value Against Predictors**"),
+    subtitle = md("_Exponentiated Coefficients and 95% CI (Research Grants, Individual Level)_")
+  ) %>%
+  fmt_number(
+    columns = c(Effect, CI_Lower_Limit, CI_Upper_Limit), 
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Effect = "Effect (multiplicative)",
+    CI_Lower_Limit = "CI Lower Limit",
+    CI_Upper_Limit = "CI Upper Limit"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+      )
+  ) %>% 
+  tab_options(
+    table.font.size = px(14),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(12)
+  ) %>%
+  cols_align(
+    align = "left",  
+    columns = c(Predictor)  
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/Individuals_Grants_table_for_report.png")
+
+```
+
+
+
+
+
+### Individual Level - Fellowships
+
+```{r}
+## Testing whether there is association between demographics and binary outcome of a successful grant being above or below £2.5million.
+
+df <- UniqueFellows.df %>% filter(FelAveAwardValue > 0) 
+
+df <- df %>% mutate(
+  Above_2.5m = case_when(
+    FelAveAwardValue >= 2.5 ~ "Above 2.5 Million",
+    TRUE ~ "Below 2.5 Million"
+  )
+)
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+
+df$Above_2.5m <- factor(df$Above_2.5m)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+df$Above_2.5m <- relevel(df$Above_2.5m, ref = "Below 2.5 Million")
+
+
+threshold_check_model <- glm(Above_2.5m ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability, 
+              data = df,
+              family = binomial(link = "logit"))
+
+#View model
+threshold_check_model
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcovHC(threshold_check_model, type = "HC3")))
+
+# table of estimates with 95% CI
+tab <- cbind(Est = coef(threshold_check_model), LL = coef(threshold_check_model) - 1.96 * se, UL = coef(threshold_check_model) + 1.96 *se)
+
+# exponentiating to get odds ratios
+tab_exp <- exp(tab)
+
+# Rounding to make more readable
+tab_exp_rounded <- round(tab_exp, 9)
+
+tab_exp_df <- as.data.frame(tab_exp_rounded)
+
+print(tab_exp_df)
+
+```
+
+
+```{r}
+# Aligning the models for award value with what was done in the pre-registered analysis for binary funding success and TopQuartile panel ranking.
+
+model1 <- lm( FelAveAwardValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability,
+                     data = df)
+
+model2 <- lm(log(FelAveAwardValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability,
+                     data = df)
+
+model3 <- lm( FelAveAwardValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed,
+                     data = df)
+
+model4 <- lm(log(FelAveAwardValue) ~ Sex + EthnicityBinary + AgeRangeCollapsed + NationalityBinary + Disability + Sex:EthnicityBinary + Sex:AgeRangeCollapsed + EthnicityBinary:AgeRangeCollapsed,
+                     data = df)
+
+
+# Create a dataframe to compare models
+model_comparison <- data.frame(
+  Model = c(
+    "Linear Model",
+    "Linear Model Log - Transformed",
+    "Linear Model w/ interactions",
+    "Linear Model w/ interactions Log - Transformed"
+  ),
+  
+  AIC = c(
+    AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model4)
+  ),
+  
+  BIC = c(
+    BIC(model1),
+    BIC(model2),
+    BIC(model3),
+    BIC(model4) 
+  )
+
+)
+
+table4.19 <- model_comparison
+
+table4.19
+
+lrtest(model1, model3)
+lrtest(model2, model4)
+
+```
+
+
+```{r, fig.height = 12, fig.width = 12}
+chosen_model <- model1
+
+plot(chosen_model)
+check_model(chosen_model)  
+```
+
+```{r}
+summary(chosen_model) # no need to transform this as the chosen model was the simple linear model without a log transformed dependent variable
+```
+
+
+```{r}
+# Obtain robust standard errors and confidence intervals
+robust_se <- sqrt(diag(vcovHC(chosen_model, type = "HC3")))  
+coef_estimates <- coef(chosen_model)  # Extract coefficients
+
+# Calculate robust confidence intervals
+robust_conf_int <- coef_estimates + cbind(-1.96 * robust_se, 1.96 * robust_se)
+
+# Create a data frame for plotting
+Fellows_unique_coef_df <- data.frame(
+  Predictor = names(coef_estimates),
+  Estimate = coef_estimates,
+  LowerCI = robust_conf_int[, 1],
+  UpperCI = robust_conf_int[, 2]
+)
+
+print(Fellows_unique_coef_df)
+```
+
+
+```{r}
+# Reset row names (optional, for a cleaner table)
+row.names(Fellows_unique_coef_df) <- NULL
+
+# Rounding to make more readable
+Fellows_unique_coef_df <- Fellows_unique_coef_df %>%
+  mutate(across(c(Estimate, LowerCI, UpperCI), ~ round(.x, 3)))
+
+
+Fellows_unique_coef_df <- Fellows_unique_coef_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "GrantCategoryResearch Grant" ~ "Research Grant",
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "SexUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityBinaryUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityBinaryUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    TRUE ~ Predictor  
+  ))
+
+
+library(stringr)
+
+Individuals_Fellows_table_for_report <- Fellows_unique_coef_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(Individuals_Fellows_table_for_report) <- NULL
+
+Individuals_Fellows_table_for_report <- Individuals_Fellows_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Effect = Estimate,
+         CI_Lower_Limit = LowerCI,
+         CI_Upper_Limit = UpperCI)
+
+
+print(Individuals_Fellows_table_for_report) ### turn this into a table for the report
+```
+
+```{r}
+# Saving the table as an image
+gt_table <- gt(Individuals_Fellows_table_for_report)
+
+gt_table <- gt_table %>%
+  tab_header(
+    title = md("**Mixed-Effects Model of Award Value Against Predictors**"),
+    subtitle = md("_Estimated Coefficients and 95% CI (Fellowships, Individual Level)_")
+  ) %>%
+  fmt_number(
+    columns = c(Effect, CI_Lower_Limit, CI_Upper_Limit), 
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Effect = "Effect",
+    CI_Lower_Limit = "CI Lower Limit",
+    CI_Upper_Limit = "CI Upper Limit"
+  ) %>% 
+  opt_table_font(
+    font = list(
+      "Frutiger LT Std 47 Condensed Light"
+      )
+  ) %>% 
+  tab_options(
+    table.font.size = px(14),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(12)
+  ) %>%
+  cols_align(
+    align = "left",  
+    columns = c(Predictor)  
+  )
+
+
+gtsave(data = gt_table, filename = "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note04/Individuals_Fellows_table_for_report.png")
+
+```
+
+

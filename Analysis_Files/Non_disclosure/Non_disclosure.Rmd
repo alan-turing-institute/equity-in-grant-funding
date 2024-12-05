@@ -1,0 +1,469 @@
+---
+title: "Bias in EPSRC Peer Review - Checking Outcomes Against Missing and Not Disclosed Demographics"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12, warning = FALSE, messages = FALSE)
+
+## Libraries
+library(boot)
+library(tidyverse)
+library(kableExtra)
+library(scales)
+library(tibble)
+library(purrr)
+library(nortest)
+
+
+
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/"
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+UKLFdata            <- "PROJ2023.002-DATA004.xlsx"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+## Define the RSS Colour palette
+
+RSSgold       <- "#D3A41B" # Female
+RSSblue       <- "#004B6D" # Male
+RSSred        <- "#cc0000" # Not Disclosed
+RSStaupe      <- "#a6a086" # Unknown
+RSSgreen      <- "#009933" # White
+RSSpurple     <- "#7879b9" # Non UK
+RSSdark       <- "#393f4d" # UK
+RSSlightblue  <- "#6db4c0" # Ethnic Minority
+RSSseablue    <- "#287fc3" # No Known Disability
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" # Known Disability
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_25andunder <- "#b6d6b3"
+col_2635 <- "#87bd00"
+col_3645 <- "#299907"
+col_4655 <- "#146f03"
+col_5665 <- "#054907"
+col_66 <- "#0f2808"
+col_white <- "#a7a7c1"
+col_chinese <- "#74749d"
+col_black <- "#1e3399"
+col_mixed <- "#090771"
+col_asian <- "#37163e"
+col_other <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+# {.tabset}
+
+## Data Preparation  
+```{r}
+## This sets up application-level dataframe
+
+## 1.1 Select columns from Grants.df
+Grants_selected.df <- EPSRC$Grants.df %>%
+  select(AnonPROJ,
+         GrantCategory,
+         GrantOutcome,
+         AdjustedApplicationValue
+  )
+
+
+## 1.2 Now select additional columns from PrincipalInvestigators.df
+PI_details.df <- EPSRC$PI.df %>%
+  select(
+    AnonPROJ,
+    AnonINV,
+    Sex,
+    AgeRange,
+    Disability,
+    EthnicGroup,
+    EthnicityBinary,
+    NationalityBinary,
+    Role
+  )
+
+
+## 1.3 Merge with PrincipalInvestigators.df
+Q0Grants.df <- left_join(PI_details.df,
+                 Grants_selected.df ,
+                 by = "AnonPROJ"
+)
+
+
+## 1.4 Cleanup
+rm(PI_details.df, 
+   Grants_selected.df
+)
+
+## Add a binary Outcome variable for Funded/Unfunded
+Q0Grants.df$BinaryOutcome <- ifelse(Q0Grants.df$GrantOutcome == "Funded", "Funded", "Unfunded")
+
+## Create factors that identify unknown, not disclosed, and disclosed for each demographic variable
+Q0Grants.df <- Q0Grants.df %>% 
+  mutate(
+    Sex = ifelse(Sex == "Unknown", "Unknown", ifelse(Sex == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    Ethnicity = ifelse(EthnicityBinary == "Unknown", "Unknown", ifelse(EthnicityBinary == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    AgeRange = ifelse(AgeRange == "Unknown", "Unknown", ifelse(AgeRange == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    Nationality = ifelse(NationalityBinary == "Unknown", "Unknown", ifelse(NationalityBinary == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    Disability = ifelse(Disability == "Unknown", "Unknown", ifelse(Disability == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    All = if_else(
+      if_all(c("Sex", "Ethnicity", "AgeRange", "Nationality", "Disability"), ~ . == "Disclosed"),
+      "All Disclosed",
+      "Not All Disclosed"
+    )
+  )
+
+```
+
+## Comparison of Binary Outcome for Rows with Complete and Incomplete Demographic Information, Application Level  
+
+```{r, rows.print = 25}
+# Calculate counts for BinaryOutcome plot
+binary_counts <- Q0Grants.df %>%
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  group_by(Variable, Level, BinaryOutcome) %>%
+  summarise(count = n(), .groups = 'drop')
+
+binary_counts <- binary_counts %>% mutate(count = round(count / 10) * 10) ## For data suppression purposes
+```
+
+```{r}
+# For BinaryOutcome
+binary_plot <- Q0Grants.df %>% 
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  ggplot(aes(x = Level, fill = as.factor(BinaryOutcome))) +
+  geom_bar(position = "fill") +
+  geom_text(data = binary_counts, aes(x = Level, y = 1, label = count), 
+            position = position_fill(vjust = 0.75), size = 5, color = "white") +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "BinaryOutcome by Levels of Demographic Variables",
+       x = "Level",
+       y = "Proportion",
+       fill = "Binary Outcome") +
+  scale_fill_manual(values = c("Funded" = RSSblue, "Unfunded" = RSSred)) +
+  theme(plot.title = element_blank(), 
+        axis.title.x = element_blank(), # Add space above x-axis title
+        axis.title.y = element_text(size = 24, margin = margin(r = 15), face = "bold"), # Add space to the right of y-axis title
+        axis.text.x = element_text(size = 16, angle = 25, vjust = 0.5), # Make axis easier to read
+        axis.text.y = element_text(size = 16, face = "bold"),  # Make axis easier to read
+        strip.text = element_text(size = 22, face = "bold"),
+        strip.background = element_rect(fill = "white"),
+        legend.text = element_text(size = 22),
+        legend.title = element_text(size = 22, face = "bold"),
+        legend.position = "top"
+        )
+
+
+binary_plot
+```
+
+## Comparison of Adjusted Award Value below £2.5m for Rows with Complete and Incomplete Demographic Information, Application Level  
+
+```{r, rows.print = 25}
+
+# Calculate counts for continuous plots, applying relevant filters
+continuous_counts <- Q0Grants.df %>% filter(AdjustedApplicationValue < 2.5 & BinaryOutcome == "Funded") %>%
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  group_by(Variable, Level) %>%
+  summarise(count = n(), .groups = 'drop')
+
+continuous_counts <- continuous_counts %>% mutate(count = round(count / 10) * 10) ## For data suppression purposes
+
+
+# For AdjustedApplicationValue
+continuous_plot1 <- Q0Grants.df %>% filter(AdjustedApplicationValue < 2.5 & BinaryOutcome == "Funded") %>% 
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  ggplot(aes(x = Level, y = AdjustedApplicationValue)) +
+  geom_violin() +
+  geom_text(data = continuous_counts, aes(x = Level, y = 2.5, label = count), 
+            position = position_fill(vjust = 1), size = 5, color = RSSred) +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "AdjustedApplicationValue below £2.5m by Levels of Demographic Variables",
+       x = "Level",
+       y = "Adjusted Application Value") +
+  theme(plot.title = element_blank(), 
+        axis.title.x = element_blank(), # Add space above x-axis title
+        axis.title.y = element_text(size = 32, margin = margin(r = 15), face = "bold"), # Add space to the right of y-axis title
+        axis.text.x = element_text(size = 22, face = "bold"), # Make axis easier to read
+        axis.text.y = element_text(size = 22, face = "bold"),  # Make axis easier to read
+        strip.text = element_text(size = 22, face = "bold"),
+        strip.background = element_rect(fill = "white")
+        )
+
+
+
+demographic_vars <- c("Sex", "Ethnicity", "AgeRange", "Nationality", "Disability", "All")
+# Loop through each demographic variable and calculate summary statistics
+summary_stats <- Q0Grants.df %>% filter(AdjustedApplicationValue < 2.5 & BinaryOutcome == "Funded") %>%
+  pivot_longer(cols = all_of(demographic_vars), 
+               names_to = "Variable", values_to = "Level") %>%
+  filter(Level != "Unknown" & !is.na(Level)) %>%
+  group_by(Variable, Level) %>%
+  summarise(
+    count = n(),
+    mean = mean(AdjustedApplicationValue, na.rm = TRUE),
+    median = median(AdjustedApplicationValue, na.rm = TRUE),
+    min = min(AdjustedApplicationValue, na.rm = TRUE),
+    max = max(AdjustedApplicationValue, na.rm = TRUE),
+    sd = sd(AdjustedApplicationValue, na.rm = TRUE)
+  )
+
+# Display the results
+summary_stats <- summary_stats %>% mutate(count = round(count / 10) * 10) ## For data suppression purposes
+
+print(summary_stats)
+
+
+continuous_plot1
+
+```
+
+
+## Comparison of Adjusted Award Value above £2.5m for Rows with Complete and Incomplete Demographic Information, Application Level  
+
+```{r, rows.print = 25}
+# Calculate counts for continuous plots, applying relevant filter
+continuous_counts <- Q0Grants.df %>% filter(AdjustedApplicationValue >= 2.5 & BinaryOutcome == "Funded") %>%
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  group_by(Variable, Level) %>%
+  summarise(count = n(), .groups = 'drop')
+
+continuous_counts <- continuous_counts %>% mutate(count = round(count / 10) * 10) ## For data suppression purposes
+
+
+
+
+continuous_plot2 <- Q0Grants.df %>% filter(AdjustedApplicationValue >= 2.5 & BinaryOutcome == "Funded") %>% 
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  ggplot(aes(x = Level, y = AdjustedApplicationValue)) +
+  geom_violin() +
+  geom_text(data = continuous_counts, aes(x = Level, y = 2.5, label = count), 
+            position = position_fill(vjust = -0.5), size = 3, color = "black") +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "AdjustedApplicationValue above £2.5m by Levels of Demographic Variables",
+       x = "Level",
+       y = "Adjusted Application Value") +
+  theme(
+      plot.title = element_blank(), 
+      axis.title.x = element_blank(), # Add space above x-axis title
+      axis.title.y = element_text(size = 32, margin = margin(r = 15), face = "bold"), # Add space to the right of y-axis title
+      plot.margin = margin(t = 20, r = 10, b = 10, l = 10), # Add extra space around the plot
+      axis.text.x = element_text(size = 16, face = "bold", angle = 90), # Make axis easier to read
+      axis.text.y = element_text(size = 22, face = "bold"),  # Make axis easier to read
+      strip.text = element_text(size = 16, face = "italic"),
+      legend.position = "top",
+      legend.text = element_text(size = 16, face = "bold")
+  )
+
+
+demographic_vars <- c("Sex", "Ethnicity", "AgeRange", "Nationality", "Disability", "All")
+# Loop through each demographic variable and calculate summary statistics
+summary_stats <- Q0Grants.df %>% filter(AdjustedApplicationValue >= 2.5 & BinaryOutcome == "Funded") %>%
+  pivot_longer(cols = all_of(demographic_vars), 
+               names_to = "Variable", values_to = "Level") %>%
+  filter(Level != "Unknown" & !is.na(Level)) %>%
+  group_by(Variable, Level) %>%
+  summarise(
+    count = n(),
+    mean = mean(AdjustedApplicationValue, na.rm = TRUE),
+    median = median(AdjustedApplicationValue, na.rm = TRUE),
+    min = min(AdjustedApplicationValue, na.rm = TRUE),
+    max = max(AdjustedApplicationValue, na.rm = TRUE),
+    sd = sd(AdjustedApplicationValue, na.rm = TRUE)
+  )
+
+# Display the results
+summary_stats <- summary_stats %>% mutate(count = round(count / 10) * 10) ## For data suppression purposes
+
+print(summary_stats)
+
+
+
+continuous_plot2
+
+
+```
+
+
+## Comparison of Top Quartile Panel Ranking for Rows with Complete and Incomplete Demographic Information, Application Level  
+
+```{r}
+
+#----Identify the meeting info----------------------------------------------- 
+# Make sure the ranking is numberic 
+EPSRC$GrantMeeting.df$MeetingOrder <- as.numeric(EPSRC$GrantMeeting.df$MeetingOrder) 
+
+# Create temp.df with rows of the final meeting 
+temp.df <- EPSRC$GrantMeeting.df %>% 
+  group_by(AnonPROJ) %>% 
+  filter(MeetingOrder == max(MeetingOrder, na.rm = TRUE)) %>% 
+  ungroup() 
+
+# fill in NAs in not-fundable 
+temp.df <- temp.df %>% 
+  mutate(FundableByScore = ifelse(is.na(FundableByScore), 
+                                  ifelse(Decision == "Not Fundable", FALSE, TRUE), 
+                                  FundableByScore)) 
+
+# Remove applications with no ranking.  
+temp.df <- temp.df %>% 
+  filter(!is.na(RankOrder)) 
+
+#----SMerge Quantiles into the main dataset------------------------------------ 
+Q0Grants.df <- Q0Grants.df%>% 
+  left_join(temp.df %>%  
+              select(AnonPROJ, RankOrder, FundableByScore, AnonMTG),  
+            by = "AnonPROJ") 
+
+# Adjust FundableByScore based on BinaryOutcome 
+Q0Grants.df <- Q0Grants.df %>% 
+  mutate(FundableByScore = if_else(BinaryOutcome == "Funded" & FundableByScore == FALSE, TRUE, FundableByScore)) 
+
+calculate_quartiles <- function(rank_order, fundable_by_score) { 
+  # Adjust for NA or 0 in rank_order or NA in fundable_by_score 
+  # Treat 0 in RankOrder as equivalent to NA for the purpose of ranking 
+  rank_order[rank_order == 0] <- NA 
+  # If all fundable_by_score are NA, but rank_order has valid numbers, proceed as if they are fundable 
+  if (all(is.na(fundable_by_score)) && any(!is.na(rank_order))) { 
+    fundable_by_score[is.na(fundable_by_score)] <- TRUE 
+  } 
+
+  # If fundable_by_score is explicitly FALSE, treat all as "Unfundable" 
+  if (all(fundable_by_score == FALSE, na.rm = TRUE)) { 
+    return(rep("Unfundable", length(rank_order))) 
+  } else { 
+    # Check for unique valid values in rank_order 
+    valid_ranks <- unique(rank_order[!is.na(rank_order)]) 
+    if (length(valid_ranks) < 2) { 
+      return(rep("Unranked", length(rank_order))) 
+    } else { 
+      # Calculate quartiles for valid rank_order values, ensure breaks are unique 
+      quartiles <- quantile(rank_order[!is.na(rank_order)], probs = c(0.25, 0.5, 0.75), na.rm = TRUE) 
+      if (length(unique(quartiles)) < 3) {  # Check if quartile values are not unique 
+        return(rep("Unranked", length(rank_order))) 
+      } 
+      breaks = c(-Inf, quartiles, Inf) 
+      labels = c("1st Quartile", "2nd Quartile", "3rd Quartile", "4th Quartile") 
+      quartile_labels <- cut(rank_order, breaks = breaks, labels = labels, include.lowest = TRUE) 
+      return(as.character(quartile_labels)) 
+    } 
+  } 
+} 
+
+Q0Grants.df <- Q0Grants.df %>% 
+  group_by(AnonMTG, FundableByScore) %>% 
+  mutate(QuartileInfo = calculate_quartiles(RankOrder, FundableByScore)) %>% 
+  ungroup() 
+
+#----Clean up dataset---------------------------------------------------------- 
+# Replace NA in QuartileInfo with "Unranked" 
+Q0Grants.df <- Q0Grants.df %>% 
+  mutate(QuartileInfo = if_else(is.na(QuartileInfo), "Unranked", QuartileInfo)) 
+
+Q0Grants.df$QuartileInfo <- factor(Q0Grants.df$QuartileInfo, 
+                                    levels = c("1st Quartile", "2nd Quartile", "3rd Quartile", "4th Quartile","Unfundable","Unranked"), 
+                                    ordered = TRUE) 
+
+# Remove temp.df from the environment 
+rm(temp.df) 
+
+
+# New binary outcome for top ranking = *TopQuartile*:
+Q0Grants.df  <- Q0Grants.df %>% 
+  mutate(TopQuartile = if_else(QuartileInfo == "1st Quartile", QuartileInfo, "Not 1st Quartile")) 
+
+```
+
+
+```{r, rows.print = 25}
+# Calculate counts for TopQuartile plot
+top_quartile_counts <- Q0Grants.df %>%
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  group_by(Variable, Level, TopQuartile) %>%
+  summarise(count = n(), .groups = 'drop')
+
+top_quartile_counts <- top_quartile_counts %>% mutate(count = round(count / 10) * 10) ## For data suppression purposes
+
+
+# For TopQuartile
+top_quartile_plot <- Q0Grants.df %>% 
+  pivot_longer(cols = c(Sex, Ethnicity, AgeRange, Nationality, Disability, All),
+               names_to = "Variable", values_to = "Level") %>%
+  ggplot(aes(x = Level, fill = as.factor(TopQuartile))) +
+  geom_bar(position = "fill") +
+  geom_text(data = top_quartile_counts, aes(x = Level, y = 1, label = count), 
+            position = position_fill(vjust = 0.75), size = 5, color = "white") +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "TopQuartile by Levels of Demographic Variables",
+       x = "Level",
+       y = "Proportion",
+       fill = "Top Quartile Ranking") +
+  scale_fill_manual(values = c("1st Quartile" = RSSblue, "Not 1st Quartile" = RSSred)) +
+  theme(plot.title = element_blank(), 
+        axis.title.x = element_blank(), # Add space above x-axis title
+        axis.title.y = element_text(size = 24, margin = margin(r = 15), face = "bold"), # Add space to the right of y-axis title
+        axis.text.x = element_text(size = 16, angle = 25, vjust = 0.5), # Make axis easier to read
+        axis.text.y = element_text(size = 16, face = "bold"),  # Make axis easier to read
+        strip.text = element_text(size = 22, face = "bold"),
+        strip.background = element_rect(fill = "white"),
+        legend.text = element_text(size = 22),
+        legend.title = element_text(size = 22, face = "bold"),
+        legend.position = "top"
+        )
+
+
+top_quartile_plot
+
+
+```

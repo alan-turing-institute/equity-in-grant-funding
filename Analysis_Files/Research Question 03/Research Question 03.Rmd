@@ -1,0 +1,1021 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 3"
+author: 'Contributors: Lucy Teece, Dakota Langhals, & Eugenie Hunsicker, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12)
+
+
+## Libraries
+library(dplyr)      # For tidy coding
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(binom)
+library(purrr)
+library(boot)
+library(dplyr)
+library(reshape2)
+library(knitr)
+library(vcd)
+library(DHARMa)
+library(see)
+library(lmtest)
+library(performance)
+library(lubridate)
+library(lme4)
+library(gtExtras)
+library(webshot2)
+
+
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note03"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/Note03"
+
+
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+
+# {.tabset}
+
+## Data Preparation
+
+```{r}
+
+#----Step1: Set up the base dataframe for analysis------------------------------------------- 
+
+# Create the new dataframe by selecting specific columns 
+GrantData.df <- EPSRC$Grants.df %>% 
+  select(AnonPROJ, GrantCategory, Driver, AnonTHM, AnonREG, GrantOutcome, FYDecisionDate, AnonOrgG, PanelOutcome) 
+
+# Perform a left join to merge dataframes 
+GrantData.df <- GrantData.df %>% 
+  left_join(EPSRC$PI.df %>%  
+              select(AnonPROJ, AnonINV, Sex, AgeRange, Disability, EthnicityBinary, NationalityBinary),  
+            by = "AnonPROJ") 
+
+#----Step 2: Bring in the Research Area Grouping------------------------------------------------------- 
+# Create temp.df by grouping and filtering for the max RAFraction 
+temp.df <- EPSRC$ResearchAreas.df %>% 
+  group_by(AnonPROJ) %>% 
+  filter(RAFraction == max(RAFraction)) %>% 
+  ungroup() 
+
+# Perform a left join to merge dataframes 
+GrantData.df <- GrantData.df %>% 
+  left_join(temp.df %>% select(AnonPROJ, AnonRAG), by = "AnonPROJ") 
+
+# Remove temp.df from the environment 
+rm(temp.df) 
+
+#----Step 3: Clean up GrantData.df------------------------------------------------------------- 
+GrantData.df <- distinct(GrantData.df, AnonPROJ, .keep_all = TRUE) 
+
+GrantData.df <- GrantData.df %>% 
+  mutate(BinarySuccess = ifelse(GrantOutcome == "Funded", "Funded", "Unfunded")) 
+
+#----Step 4: Identify the meeting info----------------------------------------------- 
+# Make sure the ranking is numberic 
+EPSRC$GrantMeeting.df$MeetingOrder <- as.numeric(EPSRC$GrantMeeting.df$MeetingOrder) 
+
+# Create temp.df with rows of the final meeting 
+temp.df <- EPSRC$GrantMeeting.df %>% 
+  group_by(AnonPROJ) %>% 
+  filter(MeetingOrder == max(MeetingOrder, na.rm = TRUE)) %>% 
+  ungroup() 
+
+# fill in NAs in not-fundable 
+temp.df <- temp.df %>% 
+  mutate(FundableByScore = ifelse(is.na(FundableByScore), 
+                                  ifelse(Decision == "Not Fundable", FALSE, TRUE), 
+                                  FundableByScore)) 
+
+# Remove applications with no ranking.  
+temp.df <- temp.df %>% 
+  filter(!is.na(RankOrder)) 
+
+#----Step 5: Merge Quantiles into the main dataset------------------------------------ 
+GrantData.df <- GrantData.df%>% 
+  left_join(temp.df %>%  
+              select(AnonPROJ, RankOrder, FundableByScore, AnonMTG),  
+            by = "AnonPROJ") 
+
+# Adjust FundableByScore based on BinarySuccess 
+GrantData.df <- GrantData.df %>% 
+  mutate(FundableByScore = if_else(BinarySuccess == "Funded" & FundableByScore == FALSE, TRUE, FundableByScore)) 
+
+calculate_quartiles <- function(rank_order, fundable_by_score) { 
+  # Adjust for NA or 0 in rank_order or NA in fundable_by_score 
+  # Treat 0 in RankOrder as equivalent to NA for the purpose of ranking 
+  rank_order[rank_order == 0] <- NA 
+  # If all fundable_by_score are NA, but rank_order has valid numbers, proceed as if they are fundable 
+  if (all(is.na(fundable_by_score)) && any(!is.na(rank_order))) { 
+    fundable_by_score[is.na(fundable_by_score)] <- TRUE 
+  } 
+
+  # If fundable_by_score is explicitly FALSE, treat all as "Unfundable" 
+  if (all(fundable_by_score == FALSE, na.rm = TRUE)) { 
+    return(rep("Unfundable", length(rank_order))) 
+  } else { 
+    # Check for unique valid values in rank_order 
+    valid_ranks <- unique(rank_order[!is.na(rank_order)]) 
+    if (length(valid_ranks) < 2) { 
+      return(rep("Unranked", length(rank_order))) 
+    } else { 
+      # Calculate quartiles for valid rank_order values, ensure breaks are unique 
+      quartiles <- quantile(rank_order[!is.na(rank_order)], probs = c(0.25, 0.5, 0.75), na.rm = TRUE) 
+      if (length(unique(quartiles)) < 3) {  # Check if quartile values are not unique 
+        return(rep("Unranked", length(rank_order))) 
+      } 
+      breaks = c(-Inf, quartiles, Inf) 
+      labels = c("1st Quartile", "2nd Quartile", "3rd Quartile", "4th Quartile") 
+      quartile_labels <- cut(rank_order, breaks = breaks, labels = labels, include.lowest = TRUE) 
+      return(as.character(quartile_labels)) 
+    } 
+  } 
+} 
+
+GrantData.df <- GrantData.df %>% 
+  group_by(AnonMTG, FundableByScore) %>% 
+  mutate(QuartileInfo = calculate_quartiles(RankOrder, FundableByScore)) %>% 
+  ungroup() 
+
+#----Step 6: Clean up dataset---------------------------------------------------------- 
+# Replace NA in QuartileInfo with "Unranked" 
+GrantData.df <- GrantData.df %>% 
+  mutate(QuartileInfo = if_else(is.na(QuartileInfo), "Unranked", QuartileInfo)) 
+
+GrantData.df$BinarySuccess <- as.factor(GrantData.df$BinarySuccess) 
+GrantData.df$AnonTHM <- as.factor(GrantData.df$AnonTHM) 
+GrantData.df$AnonREG <- as.factor(GrantData.df$AnonREG) 
+GrantData.df$AnonRAG <- as.factor(GrantData.df$AnonRAG ) 
+GrantData.df$GrantOutcome <- as.factor(GrantData.df$GrantOutcome) 
+GrantData.df$FYDecisionDate <- as.factor(GrantData.df$FYDecisionDate) 
+GrantData.df$AnonOrgG <- as.factor(GrantData.df$AnonOrgG) 
+
+GrantData.df$QuartileInfo <- factor(GrantData.df$QuartileInfo, 
+                                    levels = c("1st Quartile", "2nd Quartile", "3rd Quartile", "4th Quartile","Unfundable","Unranked"), 
+                                    ordered = TRUE) 
+
+# Remove temp.df from the environment 
+rm(temp.df) 
+
+
+
+## Edit outcome variables (binary funding success, top quartile ranking, and top half ranking).
+
+
+# Binary outcome for funded/unfunded = *BinarySuccess*:
+GrantData.df %>% 
+  count(BinarySuccess)
+
+# Ordinal outcome for ranking quartile = *QuartileInfo*:
+GrantData.df %>% 
+  count(QuartileInfo)
+
+# New binary outcome for top ranking = *TopQuartile*: - models were not converging using this outcome measure
+GrantData.df  <- GrantData.df %>% 
+  mutate(TopQuartile = if_else(QuartileInfo == "1st Quartile", QuartileInfo, "Not 1st Quartile")) 
+
+# New binary outcome for top ranking = *TopHalf*:
+GrantData.df  <- GrantData.df %>% 
+  mutate(TopHalf = if_else(QuartileInfo == "1st Quartile", "Top_Half", if_else(QuartileInfo == "2nd Quartile", "Top_Half", "Not_Top_Half"))) 
+
+GrantData.df$TopHalf <- as.factor(GrantData.df$TopHalf) 
+GrantData.df %>% 
+  count(TopHalf)
+
+
+
+## Edit predictor variables 
+
+
+# Reduced Age variable
+GrantData.df  <- GrantData.df %>% 
+  mutate(AgeCategory = recode_factor(AgeRange,
+                              "25 and Under" = "Under 36",
+                              "26-35" = "Under 36",
+                              "36-45" = "36 to 55", 
+                              "46-55" = "36 to 55", 
+                              "56-65" = "Over 55",
+                              "66+" = "Over 55",
+                              "unknown" = "Unknown")) %>%
+  mutate(AgeCategory = if_else(is.na(AgeCategory), "Unknown", AgeCategory)) %>% 
+  mutate(AgeCategory = factor(AgeCategory)) %>% 
+  mutate(AgeCategory = relevel(AgeCategory, ref="36 to 55"))
+
+levels(GrantData.df$AgeCategory)
+
+# Reduced Ethnicity variable
+GrantData.df  <- GrantData.df %>% 
+  mutate(Ethnicity = if_else(is.na(EthnicityBinary), "Unknown", 
+                             if_else(EthnicityBinary == "White", "White", 
+                                     if_else(EthnicityBinary == "Ethnic Minority", "Ethnic Minority", "Unknown")))) %>% 
+  mutate(Ethnicity = factor(Ethnicity)) %>% 
+  mutate(Ethnicity = relevel(Ethnicity, ref="White"))
+levels(GrantData.df$Ethnicity)
+
+# Also try reducing sex, nationality, and disability 
+levels(GrantData.df$Sex)
+GrantData.df  <- GrantData.df %>% 
+  mutate(SexBinary = if_else(Sex == "Male", "Male", "Other")) %>% 
+  mutate(SexBinary = factor(SexBinary)) %>% 
+  mutate(SexBinary = relevel(SexBinary, ref="Male"))
+levels(GrantData.df$SexBinary)
+
+GrantData.df  <- GrantData.df %>% 
+  mutate(SexSimple = if_else(is.na(Sex), "Unknown",
+                             if_else(Sex == "Male", "Male",
+                                     if_else(Sex == "Female", "Female", "Unknown")))) %>% 
+  mutate(SexSimple = factor(SexSimple)) %>% 
+  mutate(SexSimple = relevel(SexSimple, ref="Male"))
+levels(GrantData.df$SexSimple)
+
+GrantData.df  <- GrantData.df %>% 
+  mutate(Nationality = if_else(is.na(NationalityBinary), "Unknown",
+                             if_else(NationalityBinary == "UK", "UK",
+                                     if_else(NationalityBinary == "Non UK", "Non UK", "Unknown")))) %>% 
+  mutate(Nationality = factor(Nationality)) %>% 
+  mutate(Nationality = relevel(Nationality, ref="UK"))
+levels(GrantData.df$Nationality)
+
+levels(GrantData.df$Disability)
+GrantData.df  <- GrantData.df %>% 
+  mutate(DisabilityBinary = if_else(Disability == "Known Disability", "Known Disability", "No Known Disability")) %>% 
+  mutate(DisabilityBinary = factor(DisabilityBinary)) %>% 
+  mutate(DisabilityBinary = relevel(DisabilityBinary, ref="No Known Disability"))
+levels(GrantData.df$DisabilityBinary)
+
+```
+
+
+## Descriptive Table of results overall:
+
+```{r}
+### BinarySuccess
+
+#For Sex
+bin_sex_data <- GrantData.df %>%
+  add_count(SexSimple, name = "total_var") %>% 
+  group_by(SexSimple, BinarySuccess, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = SexSimple)
+bin_sex_data
+
+#For age
+bin_age_data <- GrantData.df %>%
+  add_count(AgeCategory, name = "total_var") %>% 
+  group_by(AgeCategory, BinarySuccess, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = AgeCategory)
+bin_age_data
+
+#For ethnicity
+bin_ethnicity_data <- GrantData.df %>%
+  add_count(Ethnicity, name = "total_var") %>% 
+  group_by(Ethnicity, BinarySuccess, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = Ethnicity)
+bin_ethnicity_data
+
+#For disability
+bin_disability_data <- GrantData.df %>%
+  add_count(DisabilityBinary, name = "total_var") %>% 
+  group_by(DisabilityBinary, BinarySuccess, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = DisabilityBinary)
+bin_disability_data
+
+#For Nationality
+bin_nationality_data <- GrantData.df %>%
+  add_count(Nationality, name = "total_var") %>% 
+  group_by(Nationality, BinarySuccess, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = Nationality)
+bin_nationality_data
+
+
+
+### Top Quartile
+
+#For Sex
+quart_sex_data <- GrantData.df %>%
+  add_count(SexSimple, name = "total_var") %>% 
+  group_by(SexSimple, QuartileInfo, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = SexSimple)
+quart_sex_data
+
+#For age
+quart_age_data <- GrantData.df %>%
+  add_count(AgeCategory, name = "total_var") %>% 
+  group_by(AgeCategory, QuartileInfo, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = AgeCategory)
+quart_age_data
+
+#For ethnicity
+quart_ethnicity_data <- GrantData.df %>%
+  add_count(Ethnicity, name = "total_var") %>% 
+  group_by(Ethnicity, QuartileInfo, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = Ethnicity)
+quart_ethnicity_data
+
+#For disability
+quart_disability_data <- GrantData.df %>%
+  add_count(DisabilityBinary, name = "total_var") %>% 
+  group_by(DisabilityBinary, QuartileInfo, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = DisabilityBinary)
+quart_disability_data
+
+#For Nationality
+quart_nationality_data <- GrantData.df %>%
+  add_count(Nationality, name = "total_var") %>% 
+  group_by(Nationality, QuartileInfo, total_var) %>% 
+  summarise(total_group = n()) %>% 
+  mutate(percent = total_group / total_var) %>% 
+  rename(Demographic = Nationality)
+quart_nationality_data
+
+```
+
+```{r}
+combined_bin_data <- bin_sex_data %>% 
+  rbind(bin_age_data) %>% 
+  rbind(bin_ethnicity_data) %>% 
+  rbind(bin_nationality_data) %>% 
+  rbind(bin_disability_data) %>% 
+  rename(Funded_Count = total_group,
+         Funded_Percent = percent) %>% 
+  filter(BinarySuccess == "Funded", Demographic != "Unknown") %>% 
+  select(c(Demographic, Funded_Count, Funded_Percent)) %>% 
+  ungroup()
+
+
+combined_quart_data <- quart_sex_data %>% 
+  rbind(quart_age_data) %>% 
+  rbind(quart_ethnicity_data) %>% 
+  rbind(quart_nationality_data) %>% 
+  rbind(quart_disability_data) %>% 
+  rename(Top_Quartile_Count = total_group,
+         Top_Quartile_Percent = percent) %>% 
+  filter(QuartileInfo == "1st Quartile", Demographic != "Unknown") %>% 
+  select(c(Demographic, Top_Quartile_Count, Top_Quartile_Percent)) %>% 
+  ungroup()
+
+combined_descriptives <- combined_bin_data %>% 
+  left_join(combined_quart_data, "Demographic") %>% 
+  select(-c(QuartileInfo, BinarySuccess))
+
+
+# Rounding the count figures
+combined_descriptives <- combined_descriptives %>%
+  mutate(
+    Funded_Count = round(Funded_Count / 5) * 5,
+    Top_Quartile_Count = round(Top_Quartile_Count / 5) * 5
+  )
+
+kable(combined_descriptives)
+
+```
+
+
+## Binary Funding Success (Funded vs Not Funded)
+
+```{r}
+GrantData.df <- GrantData.df %>% 
+  mutate(BinarySuccess = factor(BinarySuccess)) %>% 
+  mutate(BinarySuccess = relevel(BinarySuccess, ref = "Unfunded")) ## this coding ensures that the "success" category is "Funded" rather than "Unfunded"
+
+current_time <- now()
+print(current_time)
+
+# Binary Success - no interactions
+Model_full_Bin <- glmer( BinarySuccess ~
+                       SexSimple +
+                       Ethnicity +
+                       AgeCategory +
+                       DisabilityBinary +
+                       Nationality +
+                       Driver +
+                       GrantCategory +
+                       (1 | AnonRAG) +
+                       (1 | AnonTHM) +
+                       (1 | AnonREG) +
+                       (1 | FYDecisionDate),
+                     data = GrantData.df,
+                     family = binomial(link = "logit"))
+
+current_time <- now()
+print(current_time)
+
+summary(Model_full_Bin)
+```
+
+```{r}
+# Run through models adding interaction terms for hypothesis test:
+
+#Sex*Ethnciity
+Model_Bin_SE <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1 | AnonRAG) + (1 | AnonTHM) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       SexSimple:Ethnicity,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Sex*Age
+Model_Bin_SA <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       SexSimple:AgeCategory,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Sex*Disability
+Model_Bin_SD <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       SexSimple:DisabilityBinary,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Sex*Nationality
+Model_Bin_SN <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       SexSimple:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Ethnciity*Age
+Model_Bin_EA <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       Ethnicity:AgeCategory,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Ethnciity*Disability
+Model_Bin_ED <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       Ethnicity:DisabilityBinary,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Ethnciity*Nationality
+Model_Bin_EN <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       Ethnicity:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Age*Disability
+Model_Bin_AD <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       AgeCategory:DisabilityBinary,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Age*Nationality
+Model_Bin_AN <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       AgeCategory:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Disability*Nationality
+Model_Bin_DN <- glmer(BinarySuccess ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonTHM)  + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       DisabilityBinary:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+```
+
+```{r}
+# Likelihood ratio tests
+lrtest(Model_full_Bin, Model_Bin_SE)
+lrtest(Model_full_Bin, Model_Bin_SA)
+lrtest(Model_full_Bin, Model_Bin_SD)
+lrtest(Model_full_Bin, Model_Bin_SN)
+lrtest(Model_full_Bin, Model_Bin_EA)
+lrtest(Model_full_Bin, Model_Bin_ED)
+lrtest(Model_full_Bin, Model_Bin_EN)
+lrtest(Model_full_Bin, Model_Bin_AD)
+lrtest(Model_full_Bin, Model_Bin_AN)
+lrtest(Model_full_Bin, Model_Bin_DN)
+```
+
+```{r}
+# Now adding the significant interactions to the base model
+
+
+# Model_full_Bin_EDEN <- glmer( BinarySuccess ~ ### Fails to converge
+#                        SexSimple +
+#                        Ethnicity +
+#                        AgeCategory +
+#                        DisabilityBinary +
+#                        Nationality +
+#                        Driver +
+#                        GrantCategory +
+#                        Ethnicity:DisabilityBinary +  
+#                        Ethnicity:Nationality + 
+#                        (1 | AnonRAG) +
+#                        (1 | AnonTHM) +
+#                        (1 | AnonREG) +
+#                        (1 | FYDecisionDate),
+#                      data = GrantData.df,
+#                      family = binomial(link = "logit"))
+# 
+# 
+# 
+# Model_full_Bin_EDEA <- glmer( BinarySuccess ~ ### Fails to converge
+#                        SexSimple +
+#                        Ethnicity +
+#                        AgeCategory +
+#                        DisabilityBinary +
+#                        Nationality +
+#                        Driver +
+#                        GrantCategory +
+#                        Ethnicity:AgeCategory +
+#                        Ethnicity:DisabilityBinary +  
+#                        (1 | AnonRAG) +
+#                        (1 | AnonTHM) +
+#                        (1 | AnonREG) +
+#                        (1 | FYDecisionDate),
+#                      data = GrantData.df,
+#                      family = binomial(link = "logit"))
+
+
+
+Model_full_Bin_ENEA <- glmer( BinarySuccess ~ ### Converges, but highly collinear
+                       SexSimple +
+                       Ethnicity +
+                       AgeCategory +
+                       DisabilityBinary +
+                       Nationality +
+                       Driver +
+                       GrantCategory +
+                       Ethnicity:AgeCategory +
+                       Ethnicity:Nationality + 
+                       (1 | AnonRAG) +
+                       (1 | AnonTHM) +
+                       (1 | AnonREG) +
+                       (1 | FYDecisionDate),
+                     data = GrantData.df,
+                     family = binomial(link = "logit"))
+
+
+
+# Model_full_Bin_Int <- glmer( BinarySuccess ~ ### Fails to converge
+#                        SexSimple +
+#                        Ethnicity +
+#                        AgeCategory +
+#                        DisabilityBinary +
+#                        Nationality +
+#                        Driver +
+#                        GrantCategory +
+#                        Ethnicity:AgeCategory +
+#                        Ethnicity:DisabilityBinary +  
+#                        Ethnicity:Nationality + 
+#                        (1 | AnonRAG) +
+#                        (1 | AnonTHM) +
+#                        (1 | AnonREG) +
+#                        (1 | FYDecisionDate),
+#                      data = GrantData.df,
+#                      family = binomial(link = "logit"))
+
+
+### Compare the models
+lrt <- anova(Model_full_Bin, Model_full_Bin_ENEA, test = "LRT")
+print(lrt)
+```
+
+
+```{r fig.height = 12, fig.width = 12}
+# Checking the interaction models that were significant separately to see the sign of the interaction effects - the model with both in is highly collinear.
+summary(Model_Bin_EN)
+summary(Model_Bin_EA)
+```
+
+```{r}
+chosen_model <- Model_full_Bin
+
+summary(chosen_model)
+check_model(chosen_model)
+
+```
+
+```{r rows.print = 40}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+coefficient_table <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+coefficient_table_exp <- exp(coefficient_table)
+
+# Rounding to make more readable
+coefficient_table_exp_rounded <- round(coefficient_table_exp, 3)
+
+coefficient_table_exp_rounded_df <- as.data.frame(coefficient_table_exp_rounded)
+
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+
+
+coefficient_table_exp_rounded_df <- coefficient_table_exp_rounded_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "GrantCategoryResearch Grant" ~ "Research Grant",
+    Predictor == "SexSimpleFemale" ~ "Female",
+    Predictor == "SexSimpleUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityBinaryKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityBinaryNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeCategoryOver 55" ~ "Age > 55",
+    Predictor == "AgeCategoryUnder 36" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "EthnicityEthnic Minority:AgeCategory36 to 55" ~ "Ethnic Minority 36 - 55",
+    Predictor == "EthnicityEthnic Minority:AgeCategoryOver 55" ~ "Ethnic Minority > 55",
+    Predictor == "EthnicityEthnic Minority:NationalityNon UK" ~ "Non-UK Ethnic Minority",
+    TRUE ~ Predictor  
+  ))
+
+library(stringr)
+
+OR_Bin_table_for_report <- coefficient_table_exp_rounded_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(OR_Bin_table_for_report) <- NULL
+
+OR_Bin_table_for_report <- OR_Bin_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Odds_Ratio = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(OR_Bin_table_for_report) ### turn this into a table for the report
+```
+
+
+
+### Model Predictions
+
+```{r}
+newdata_bin = GrantData.df %>% select(SexSimple, Ethnicity, AgeCategory, DisabilityBinary, Nationality, Driver, GrantCategory, AnonRAG, AnonTHM, AnonREG, FYDecisionDate)
+newdata_bin <- na.omit(newdata_bin)
+
+
+# Change sex and ethnicity for all observations to desired groupings (all combinations of ethnicity and sex)
+newdata_binWM <- newdata_bin %>% mutate(Ethnicity = "White", SexSimple = "Male")
+newdata_binWF <- newdata_bin %>% mutate(Ethnicity = "White", SexSimple = "Female")
+newdata_binEM <- newdata_bin %>% mutate(Ethnicity = "Ethnic Minority", SexSimple = "Male")
+newdata_binEF <- newdata_bin %>% mutate(Ethnicity = "Ethnic Minority", SexSimple = "Female")
+
+# Get the predictions for each observation after the changes
+newdata_binWM$predicted <- predict(chosen_model, newdata_binWM, type = "response")
+newdata_binWF$predicted <- predict(chosen_model, newdata_binWF, type = "response")
+newdata_binEM$predicted <- predict(chosen_model, newdata_binEM, type = "response")
+newdata_binEF$predicted <- predict(chosen_model, newdata_binEF, type = "response")
+
+# Calculate the mean predictions
+outputs_binWM <- newdata_binWM %>% 
+  group_by(SexSimple, Ethnicity) %>% 
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binWF <- newdata_binWF %>% 
+  group_by(SexSimple, Ethnicity) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binEM <- newdata_binEM %>% 
+  group_by(SexSimple, Ethnicity) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_binEF <- newdata_binEF %>% 
+  group_by(SexSimple, Ethnicity) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_bin_newmethod <- rbind(outputs_binWM, outputs_binWF, outputs_binEM, outputs_binEF)
+
+outputs_bin_newmethod
+```
+
+
+
+## TopQuartile Ranking
+
+```{r}
+GrantData.df <- GrantData.df %>% 
+  mutate(TopQuartile = factor(TopQuartile)) %>% 
+  mutate(TopQuartile = relevel(TopQuartile, ref = "Not 1st Quartile")) ## Ensures the "success" category is "1st Quartile"
+
+# TopQuartile - no interactions --- here, AnonTHM had to be dropped to avoid singular boundary error and non-convergence issues
+current_time <- now()
+print(current_time)
+
+Model_full_Quart <- glmer( TopQuartile ~
+                       SexSimple +
+                       Ethnicity +
+                       AgeCategory +
+                       DisabilityBinary +
+                       Nationality +
+                       Driver +
+                       GrantCategory +
+                       (1 | AnonRAG) +
+                       (1 | AnonREG) +
+                       (1 | FYDecisionDate),
+                     data = GrantData.df,
+                     family = binomial(link = "logit"))
+
+current_time <- now()
+print(current_time)
+
+summary(Model_full_Quart)
+
+```
+
+```{r}
+# Run through models adding interaction terms for hypothesis test:
+
+#Sex*Ethnciity
+Model_Q_SE <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       SexSimple:Ethnicity,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Sex*Age
+Model_Q_SA <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG)  + (1 | FYDecisionDate) +
+                       SexSimple:AgeCategory,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Sex*Disability
+Model_Q_SD <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG)  + (1 | FYDecisionDate) +
+                       SexSimple:DisabilityBinary,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Sex*Nationality
+Model_Q_SN <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG)  + (1 | FYDecisionDate) +
+                       SexSimple:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Ethnciity*Age
+Model_Q_EA <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       Ethnicity:AgeCategory,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Ethnciity*Disability
+Model_Q_ED <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       Ethnicity:DisabilityBinary,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Ethnciity*Nationality
+Model_Q_EN <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       Ethnicity:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Age*Disability
+Model_Q_AD <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       AgeCategory:DisabilityBinary,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Age*Nationality
+Model_Q_AN <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       AgeCategory:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+
+#Disability*Nationality
+Model_Q_DN <- glmer(TopQuartile ~ SexSimple + Ethnicity + AgeCategory + DisabilityBinary + Nationality + Driver + GrantCategory + (1| AnonRAG) + (1 | AnonREG) + (1 | FYDecisionDate) +
+                       DisabilityBinary:Nationality,
+                     data = GrantData.df, family = binomial(link = "logit"), control=glmerControl(optimizer="bobyqa"))
+```
+
+```{r}
+# Likelihood ratio tests
+lrtest(Model_full_Quart, Model_Q_SE)
+lrtest(Model_full_Quart, Model_Q_SA)
+lrtest(Model_full_Quart, Model_Q_SD)
+lrtest(Model_full_Quart, Model_Q_SN)
+lrtest(Model_full_Quart, Model_Q_EA)
+lrtest(Model_full_Quart, Model_Q_ED)
+lrtest(Model_full_Quart, Model_Q_EN)
+lrtest(Model_full_Quart, Model_Q_AD)
+lrtest(Model_full_Quart, Model_Q_AN)
+lrtest(Model_full_Quart, Model_Q_DN)
+
+#### All fail to reject the null
+
+```
+
+
+```{r fig.height = 12, fig.width = 12}
+chosen_model <- Model_full_Quart 
+
+print(chosen_model)
+check_model(chosen_model)
+
+```
+
+```{r rows.print = 40}
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+coefficient_table <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+# table of estimates as ORs with 95% CI
+coefficient_table_exp <- exp(coefficient_table)
+
+# Rounding to make more readable
+coefficient_table_exp_rounded <- round(coefficient_table_exp, 3)
+
+coefficient_table_exp_rounded_df <- as.data.frame(coefficient_table_exp_rounded)
+
+coefficient_table_exp_rounded_df$Predictor <- row.names(coefficient_table_exp_rounded_df)
+
+
+coefficient_table_exp_rounded_df <- coefficient_table_exp_rounded_df %>%  ## clean up the names of the predictors for better presentation
+  mutate(Predictor = case_when(
+    Predictor == "DriverStrategic" ~ "Strategic Funding Opportunity",
+    Predictor == "GrantCategoryResearch Grant" ~ "Research Grant",
+    Predictor == "SexSimpleFemale" ~ "Female",
+    Predictor == "SexSimpleUnknown" ~ "Sex Unknown",
+    Predictor == "NationalityUnknown" ~ "Nationality Unknown",
+    Predictor == "NationalityNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "EthnicityUnknown" ~ "Ethnicity Unknown",
+    Predictor == "DisabilityBinaryKnown Disability" ~ "Known Disability",
+    Predictor == "DisabilityBinaryNo Known Disability" ~ "No Known Disability",
+    Predictor == "AgeCategoryOver 55" ~ "Age > 55",
+    Predictor == "AgeCategoryUnder 36" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "EthnicityEthnic Minority:DisabilityBinaryNo Known Disability" ~ "Ethnic Minority No Known Disability",
+    Predictor == "EthnicityEthnic Minority:AgeCategoryOver 56" ~ "Ethnic Minority > 55",
+    Predictor == "EthnicityEthnic Minority:NationalityNon UK" ~ "Non-UK Ethnic Minority",
+    TRUE ~ Predictor 
+  ))
+
+library(stringr)
+
+OR_Quart_table_for_report <- coefficient_table_exp_rounded_df %>% filter(!str_detect(Predictor, "Unknown"))
+rownames(OR_Quart_table_for_report) <- NULL
+
+OR_Quart_table_for_report <- OR_Quart_table_for_report %>% 
+  select(Predictor, everything()) %>% 
+  rename(Odds_Ratio = Est,
+         CI_Lower_Limit = LL,
+         CI_Upper_Limit = UL)
+
+
+print(OR_Quart_table_for_report) ### turn this into a table for the report
+```
+
+
+### Model Predictions
+
+```{r}
+newdata_quart = GrantData.df %>% select(SexSimple, Ethnicity, AgeCategory, DisabilityBinary, Nationality, Driver, GrantCategory, AnonRAG, AnonREG, FYDecisionDate)
+newdata_quart <- na.omit(newdata_quart)
+
+
+# Change sex and ethnicity for all observations to desired groupings (all combinations of ethnicity and sex)
+newdata_quartWY <- newdata_quart %>% mutate(Ethnicity = "White", AgeCategory = "Under 36")
+newdata_quartWM <- newdata_quart %>% mutate(Ethnicity = "White", AgeCategory = "36 to 55")
+newdata_quartWO <- newdata_quart %>% mutate(Ethnicity = "White", AgeCategory = "Over 55")
+newdata_quartEY <- newdata_quart %>% mutate(Ethnicity = "Ethnic Minority", AgeCategory = "Under 36")
+newdata_quartEM <- newdata_quart %>% mutate(Ethnicity = "Ethnic Minority", AgeCategory = "36 to 55")
+newdata_quartEO <- newdata_quart %>% mutate(Ethnicity = "Ethnic Minority", AgeCategory = "Over 55")
+
+
+# Get the predictions for each observation after the changes
+newdata_quartWY$predicted <- predict(chosen_model, newdata_quartWY, type = "response")
+newdata_quartWM$predicted <- predict(chosen_model, newdata_quartWM, type = "response")
+newdata_quartWO$predicted <- predict(chosen_model, newdata_quartWO, type = "response")
+newdata_quartEY$predicted <- predict(chosen_model, newdata_quartEY, type = "response")
+newdata_quartEM$predicted <- predict(chosen_model, newdata_quartEM, type = "response")
+newdata_quartEO$predicted <- predict(chosen_model, newdata_quartEO, type = "response")
+
+
+# Calculate the mean predictions
+outputs_quartWY <- newdata_quartWY %>% 
+  group_by(Ethnicity, AgeCategory) %>% 
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_quartWM <- newdata_quartWM %>% 
+  group_by(Ethnicity, AgeCategory) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_quartWO <- newdata_quartWO %>% 
+  group_by(Ethnicity, AgeCategory) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_quartEY <- newdata_quartEY %>% 
+  group_by(Ethnicity, AgeCategory) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_quartEM <- newdata_quartEM %>% 
+  group_by(Ethnicity, AgeCategory) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_quartEO <- newdata_quartEO %>% 
+  group_by(Ethnicity, AgeCategory) %>%
+  summarise(
+    mean_pred = mean(predicted, na.rm = TRUE)
+  )
+
+outputs_quart_newmethod <- rbind(outputs_quartWY, outputs_quartWM, outputs_quartWO, outputs_quartEY, outputs_quartEM, outputs_quartEO)
+
+outputs_quart_newmethod
+```

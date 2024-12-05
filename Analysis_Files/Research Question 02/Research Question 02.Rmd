@@ -1,0 +1,473 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 2"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.height = 12, fig.width = 12, warning = FALSE, message = FALSE)
+
+library(dplyr)
+library(kableExtra)
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+library(openxlsx)
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note02"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/Note02"
+
+
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+
+```
+
+# {.tabset}
+
+## Sex
+
+#### Comparing All EPSRC Population Proportions Across Roles, by Year, by Female Proportion
+```{r}
+
+df_panelist <- CI_Tables$Panelist$Sex.df
+df_awardee <- CI_Tables$Awardee$Sex.df
+df_reviewer <- CI_Tables$Reviewer$Sex.df
+df_applicant <- CI_Tables$Applicant$Sex.df
+
+
+df_panelist$Source <- "Panelists"
+df_applicant$Source <- "Applicants (all)"
+df_awardee$Source <- "Awardees (all)"
+df_reviewer$Source <- "Reviewers"
+
+
+# Combine dataframes
+df_combined <- rbind(df_panelist, df_awardee, df_reviewer, df_applicant)
+df_combined <- df_combined %>% filter(Sex == "Female")
+
+df_combined <- df_combined %>% mutate(
+  Year = substr(Year, 1, 4) 
+)
+
+
+
+
+female_proportions <- ggplot(df_combined, aes(x = Year, y = Proportion*100, color = Source)) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +
+  geom_errorbar(aes(ymin = BasicBootCI_L*100, ymax = BasicBootCI_U*100), width = 0.5, size = 0.8, alpha = 0.5, position = position_dodge(width = 0.2)) +
+  labs(x = "Academic Year (Beginning)", 
+       y = "Proportion (%)", 
+       title = "Comparing EPSRC Population Female Proportions\nAcross Roles, by Year",
+       color = "Population") +
+  scale_color_manual(
+    values = c(
+        "Panelists" = RSSred,
+        "Applicants (all)" = RSSblue,
+        "Awardees (all)" = RSSgreen,
+        "Reviewers" = RSSgold
+    )
+  ) +
+    scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     breaks = seq(0, 40, by = 10),
+                     limits = c(0, 40)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank()   
+  )
+
+
+
+
+print(female_proportions)
+# Save the plot
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note02"
+
+ggsave(filename = paste0(figure_folder_path, "/female_proportions_comparison.png"), 
+       plot = female_proportions, width = 14, height = 12, dpi = 600, bg = "white")
+
+```
+
+
+## Ethnicity
+
+#### Comparing All EPSRC Population Proportions Across Roles, by Year, by Ethnic Minority Proportion
+```{r}
+
+df_panelist <- CI_Tables$Panelist$Eth.df
+df_awardee <- CI_Tables$Awardee$Eth.df
+df_reviewer <- CI_Tables$Reviewer$Eth.df
+df_applicant <- CI_Tables$Applicant$Eth.df
+
+
+df_panelist$Source <- "Panelists"
+df_applicant$Source <- "Applicants (all)"
+df_awardee$Source <- "Awardees (all)"
+df_reviewer$Source <- "Reviewers"
+
+
+# Combine dataframes
+df_combined <- rbind(df_panelist, df_awardee, df_reviewer, df_applicant)
+df_combined <- df_combined %>% filter(EthnicityBinary == "Ethnic Minority")
+
+df_combined <- df_combined %>% mutate(
+  Year = substr(Year, 1, 4) 
+)
+
+
+
+
+ethnicity_proportions <- ggplot(df_combined, aes(x = Year, y = Proportion*100, color = Source)) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +
+  geom_errorbar(aes(ymin = BasicBootCI_L*100, ymax = BasicBootCI_U*100), width = 0.5, size = 0.8, alpha = 0.5, position = position_dodge(width = 0.2)) +
+  labs(x = "Academic Year (Beginning)", 
+       y = "Proportion (%)", 
+       title = "Comparing EPSRC Population Ethnic Minority Proportions\nAcross Roles, by Year",
+       color = "Population") +
+  scale_color_manual(
+    values = c(
+        "Panelists" = RSSred,
+        "Applicants (all)" = RSSblue,
+        "Awardees (all)" = RSSgreen,
+        "Reviewers" = RSSgold
+    )
+  ) +
+    scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     breaks = seq(0, 40, by = 10),
+                     limits = c(0, 40)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank()   
+  )
+
+
+
+print(ethnicity_proportions)
+# Save the plot
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note02"
+
+ggsave(filename = paste0(figure_folder_path, "/ethnicity_proportions_comparison.png"), 
+       plot = ethnicity_proportions, width = 14, height = 12, dpi = 600, bg = "white")
+
+```
+
+
+## Nationality
+
+#### Comparing All EPSRC Population Proportions Across Roles, by Year, by Non-UK Proportion
+```{r}
+
+df_panelist <- CI_Tables$Panelist$Nat.df
+df_awardee <- CI_Tables$Awardee$Nat.df
+df_reviewer <- CI_Tables$Reviewer$Nat.df
+df_applicant <- CI_Tables$Applicant$Nat.df
+
+
+df_panelist$Source <- "Panelists"
+df_applicant$Source <- "Applicants (all)"
+df_awardee$Source <- "Awardees (all)"
+df_reviewer$Source <- "Reviewers"
+
+
+# Combine dataframes
+df_combined <- rbind(df_panelist, df_awardee, df_reviewer, df_applicant)
+df_combined <- df_combined %>% filter(NationalityBinary == "Non UK")
+
+df_combined <- df_combined %>% mutate(
+  Year = substr(Year, 1, 4) 
+)
+
+
+
+
+nationality_proportions <- ggplot(df_combined, aes(x = Year, y = Proportion*100, color = Source)) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +
+  geom_errorbar(aes(ymin = BasicBootCI_L*100, ymax = BasicBootCI_U*100), width = 0.5, size = 0.8, alpha = 0.5, position = position_dodge(width = 0.2)) +
+  labs(x = "Academic Year (Beginning)", 
+       y = "Proportion (%)", 
+       title = "Comparing EPSRC Population Non-UK Proportions\nAcross Roles, by Year",
+       color = "Population") +
+  scale_color_manual(
+    values = c(
+        "Panelists" = RSSred,
+        "Applicants (all)" = RSSblue,
+        "Awardees (all)" = RSSgreen,
+        "Reviewers" = RSSgold
+    )
+  ) +
+    scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     breaks = seq(0, 40, by = 10),
+                     limits = c(0, 40)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank()   
+  )
+
+
+
+print(nationality_proportions)
+# Save the plot
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note02"
+
+ggsave(filename = paste0(figure_folder_path, "/nationality_proportions_comparison.png"), 
+       plot = nationality_proportions, width = 14, height = 12, dpi = 600, bg = "white")
+
+```
+
+
+## Disability
+
+#### Comparing All EPSRC Population Proportions Across Roles, by Year, by Disabled Proportion
+```{r}
+
+df_panelist <- CI_Tables$Panelist$Dis.df
+df_awardee <- CI_Tables$Awardee$Dis.df
+df_reviewer <- CI_Tables$Reviewer$Dis.df
+df_applicant <- CI_Tables$Applicant$Dis.df
+
+
+df_panelist$Source <- "Panelists"
+df_applicant$Source <- "Applicants (all)"
+df_awardee$Source <- "Awardees (all)"
+df_reviewer$Source <- "Reviewers"
+
+
+# Combine dataframes
+df_combined <- rbind(df_panelist, df_awardee, df_reviewer, df_applicant)
+df_combined <- df_combined %>% filter(Disability == "Known Disability")
+
+df_combined <- df_combined %>% mutate(
+  Year = substr(Year, 1, 4) 
+)
+
+
+
+
+disability_proportions <- ggplot(df_combined, aes(x = Year, y = Proportion*100, color = Source)) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +
+  geom_errorbar(aes(ymin = BasicBootCI_L*100, ymax = BasicBootCI_U*100), width = 0.5, size = 0.8, alpha = 0.5, position = position_dodge(width = 0.2)) +
+  labs(x = "Academic Year (Beginning)", 
+       y = "Proportion (%)", 
+       title = "Comparing EPSRC Population Proportions with\nKnown Disability Across Roles, by Year",
+       color = "Population") +
+  scale_color_manual(
+    values = c(
+        "Panelists" = RSSred,
+        "Applicants (all)" = RSSblue,
+        "Awardees (all)" = RSSgreen,
+        "Reviewers" = RSSgold
+    )
+  ) +
+    scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     breaks = seq(0, 10, by = 2),
+                     limits = c(0, 10)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank()   
+  )
+
+
+
+print(disability_proportions)
+# Save the plot
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note02"
+
+ggsave(filename = paste0(figure_folder_path, "/disability_proportions_comparison.png"), 
+       plot = disability_proportions, width = 14, height = 12, dpi = 600, bg = "white")
+
+```
+
+
+## Age
+
+#### Comparing All EPSRC Population Proportions Across Roles, by Year, by Age Group Proportion
+```{r}
+
+df_panelist <- CI_Tables$Panelist$Age.df
+df_awardee <- CI_Tables$Awardee$Age.df
+df_reviewer <- CI_Tables$Reviewer$Age.df
+df_applicant <- CI_Tables$Applicant$Age.df
+
+
+df_panelist$Source <- "Panelists"
+df_applicant$Source <- "Applicants (all)"
+df_awardee$Source <- "Awardees (all)"
+df_reviewer$Source <- "Reviewers"
+
+
+# Combine dataframes
+df_combined <- rbind(df_panelist, df_awardee, df_reviewer, df_applicant)
+
+df_combined <- df_combined %>% mutate(
+  Year = substr(Year, 1, 4) 
+)
+
+
+
+
+age_proportions <- ggplot(df_combined %>% filter(AgeRange != "Unknown"), aes(x = Year, y = Proportion * 100, color = Source)) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +
+  geom_errorbar(aes(ymin = BasicBootCI_L*100, ymax = BasicBootCI_U*100), width = 0.5, size = 0.8, alpha = 0.5, position = position_dodge(width = 0.2)) +
+  facet_wrap(~AgeRange, ncol = 3) +
+  labs(x = "Academic Year (Beginning)", 
+       y = "Proportion (%)", 
+       title = "Comparing EPSRC Population Proportions by Age\nAcross Roles, by Year",
+       color = "Population") +
+  scale_color_manual(
+    values = c(
+        "Panelists" = RSSred,
+        "Applicants (all)" = RSSblue,
+        "Awardees (all)" = RSSgreen,
+        "Reviewers" = RSSgold
+    )
+  ) +
+    scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     breaks = seq(0, 50, by = 10),
+                     limits = c(0, 50)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, angle = 90, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+  )
+
+
+
+print(age_proportions)
+# Save the plot
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note02"
+
+ggsave(filename = paste0(figure_folder_path, "/age_proportions_comparison.png"), 
+       plot = age_proportions, width = 14, height = 12, dpi = 600, bg = "white")
+
+```

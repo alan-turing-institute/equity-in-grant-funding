@@ -1,0 +1,615 @@
+---
+title: "Bias in EPSRC Peer Review - HESA Comparison Charts"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12)
+
+
+## Libraries
+library(dplyr)      # For tidy coding
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(binom)
+library(purrr)
+library(boot)
+library(dplyr)
+library(reshape2)
+library(knitr)
+library(vcd)
+
+
+
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/Note01"
+
+
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+# {.tabset}
+
+
+## Defining Functions
+
+```{r}
+calculate_HESA_proportions.f <- function(df, group_col) {
+  # Function to calculate the confidence interval and handle zero values
+  
+  df2 <- df %>% filter(Year != "2012/2013" & Year != "2013/2014")
+  calculate_ci <- function(fte_sum, total_fte) {
+    if (fte_sum == 0) {
+      return(c(0, 0))
+    } else {
+      ci <- binom.confint(fte_sum, total_fte, conf.level = 0.95, methods = "wilson")
+      return(c(ci$lower, ci$upper))
+    }
+  }
+  
+  # Filter the dataset for Role == "Teach and Research" - this is the most directly comparable to the EPSRC data, as they are the most likely to apply for funding with EPSRC.
+  df_teach_and_research <- df2 %>%
+    filter(Role == "Teach and Research")
+  
+  # Group by Year and the specified column and sum the FTE for "Teach and Research" role
+  grouped_df_teach_and_research <- df_teach_and_research %>%
+    group_by(Year, !!sym(group_col)) %>%
+    summarise(FTE_sum = sum(FTE), .groups = 'drop')
+  
+  # Calculate the total FTE per Year for "Teach and Research" role
+  total_fte_per_year_teach_and_research <- grouped_df_teach_and_research %>%
+    group_by(Year) %>%
+    summarise(Total_FTE = sum(FTE_sum), .groups = 'drop')
+  
+  # Merge the total FTE back with the grouped data for "Teach and Research" role
+  proportion_df_teach_and_research <- grouped_df_teach_and_research %>%
+    left_join(total_fte_per_year_teach_and_research, by = "Year") %>%
+    mutate(PropTR = FTE_sum / Total_FTE) %>%
+    rowwise() %>%
+    mutate(
+      CI = list(calculate_ci(FTE_sum, Total_FTE)),
+      CI_L_TR = CI[1],
+      CI_U_TR = CI[2]
+    ) %>%
+    ungroup() %>%
+    select(-CI)  # Remove the CI column containing list elements
+  
+  return(proportion_df_teach_and_research)
+}
+
+
+```
+
+```{r confidence_interval_function}
+##Function-----------------------------------------
+# Function to calculate bootstrap CI for proportions
+boot_ci <- function(data, indices) {
+  sampled_data <- data[indices]
+  prop <- mean(sampled_data)
+  return(prop)
+}
+
+# helper Function to compute bootstrapped confidence intervals
+compute_ci <- function(data) {
+  if (length(data) < 2) {
+    return(data.frame(CI_Lower = NA, CI_Upper = NA))
+  }
+  
+  boot_result <- boot(data, boot_ci, R = 1000)
+  ci <- boot.ci(boot_result, type = "basic")
+  return(data.frame(CI_Lower = ci$basic[4], CI_Upper = ci$basic[5]))
+}
+
+# Generalized function to compute counts, proportions, and CIs by group and demographic
+compute_statistics <- function(df, group_col, demo_col) {
+  df <- df %>%
+    rename(Group = !!sym(group_col), Demographic = !!sym(demo_col))
+  
+  groups <- unique(df$Group)
+  results_list <- list()
+  
+  for (group in groups) {
+    group_df <- df %>% filter(Group == group)
+    
+    result <- group_df %>%
+      group_by(Demographic) %>%
+      summarise(
+        Count = n(),
+        Proportion = Count / nrow(group_df)
+      ) %>%
+      ungroup() %>%
+      rowwise() %>%
+      mutate(
+        CI = list(compute_ci(group_df$Demographic == Demographic)),
+        CI_L = CI$CI_Lower,
+        CI_U = CI$CI_Upper
+      ) %>%
+      select(-CI) %>%
+      ungroup() %>%
+      mutate(Year = group)
+    
+    results_list[[group]] <- result
+  }
+  
+  results_df <- bind_rows(results_list) %>%
+    mutate(Group = demo_col)
+  
+  results_df <- results_df %>%
+    rename(!!sym(demo_col) := Demographic)
+  
+  return(results_df)
+}
+
+```
+
+
+```{r}
+plot_HESA_Comparison.f <- function(HESA_df, EPSRC_df, demographic, c1, c2, ribbon_fade = 0.5, title_text) {
+  
+  # Define colors
+  colors <- c(
+    "HESA: Teaching and Research (95% Confidence Interval)" = c1,
+    "EPSRC" = c2
+  )
+  
+  # Prepare the HESA dataframe
+  HESA_prepared <- HESA_df %>% 
+    filter(!!sym(demographic) != "Unknown" & !!sym(demographic) != "Other")
+  
+  # Prepare the EPSRC dataframe
+  EPSRC_prepared <- EPSRC_df %>% 
+    filter(!!sym(demographic) != "Unknown" & !!sym(demographic) != "Not disclosed")
+  
+  # Plotting
+  ggplot() +
+    # Ribbon for HESA data
+    geom_ribbon(
+      data = HESA_prepared,
+      aes(
+        x = Year,
+        ymin = CI_L_TR,
+        ymax = CI_U_TR,
+        fill = "HESA: Teaching and Research (95% Confidence Interval)",
+        group = 1
+      ),
+      alpha = ribbon_fade
+    ) +
+    # Points for EPSRC data
+    geom_point(
+      data = EPSRC_prepared,
+      aes(
+        x = Year,
+        y = Proportion,
+        color = "EPSRC"
+      ),
+      shape = 19,
+      size = 4
+    ) +
+    # Error bars for EPSRC data
+    geom_errorbar(
+      data = EPSRC_prepared,
+      aes(
+        x = Year,
+        ymin = CI_L,
+        ymax = CI_U,
+        color = "EPSRC"
+      ),
+      width = 0.2,
+      size = 1
+    ) +
+    # Facet by demographic
+    facet_wrap(as.formula(paste("~", demographic)), scales = "free_y", ncol = 2) +
+    # Y-axis labels as percentages
+    scale_y_continuous(limits = c(0, 0.45), labels = scales::percent_format(accuracy = 1)) +
+    # Custom color scale for EPSRC
+    scale_color_manual(values = colors, name = NULL) +
+    # Custom fill scale for HESA
+    scale_fill_manual(
+      values = c("HESA: Teaching and Research (95% Confidence Interval)" = c1),
+      name = NULL
+    ) +
+    # Labels and themes
+    labs(
+      title = title_text,
+      y = "Proportions",
+      x = "Academic Year (Beginning)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"), # Center title, add space below
+      axis.title.x = element_text(size = 22, margin = margin(t = 15), face = "bold"), # Add space above x-axis title
+      axis.title.y = element_text(size = 22, margin = margin(r = 15), face = "bold"), # Add space to the right of y-axis title
+      plot.margin = margin(t = 20, r = 10, b = 10, l = 10), # Add extra space around the plot
+      axis.text.x = element_text(size = 16, face = "bold", angle = 90), # Make axis easier to read
+      axis.text.y = element_text(size = 16, face = "bold"),  # Make axis easier to read
+      strip.text = element_text(size = 16, face = "italic"),
+      legend.position = "top",
+      legend.text = element_text(size = 16, face = "bold")
+    )
+}
+
+```
+
+## Sex
+
+<br>
+
+#### Comparing EPSRC Applicants with HESA Population, by Sex
+
+(2014/15 to 2022/23. All Unique Researchers)
+
+```{r}
+hesa.df <- calculate_HESA_proportions.f(HESA$Sex.df %>% filter(Sex != "Other", Sex != "Unknown"), "Sex")
+
+hesa.df$Year <- substr(hesa.df$Year, 1, 4)
+
+df <- EPSRC$Investigators.df %>% filter(Sex != "Not Disclosed", Sex != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "Sex")
+
+epsrc.df$Year <- substr(epsrc.df$Year, 1, 4)
+
+
+
+HESA_sex <- plot_HESA_Comparison.f(
+  HESA_df = hesa.df %>% filter(Sex == "Female"),
+  EPSRC_df = epsrc.df %>% filter(Sex == "Female"),
+  demographic = "Sex",
+  RSSgold,
+  "black",
+  title_text = "Proportion of EPSRC Applicants Who Are Female\nCompared to HESA Population"
+)
+
+print(HESA_sex)
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/sex_HESA_comparison.png"), 
+       plot = HESA_sex, width = 12, height = 8, dpi = 800, bg = "white")
+```
+
+
+## Ethnicity
+
+#### Comparing EPSRC Applicants with HESA Population, by Binary Ethnicity
+
+(2014/15 to 2022/23. All Unique Researchers)
+
+```{r}
+hesa.df <- calculate_HESA_proportions.f(HESA$Ethnicity.df %>% filter(EthnicityBinary != "Other", EthnicityBinary != "Unknown"), "EthnicityBinary")
+
+hesa.df$Year <- substr(hesa.df$Year, 1, 4)
+
+df <- EPSRC$Investigators.df %>% filter(EthnicityBinary != "Not Disclosed", EthnicityBinary != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "EthnicityBinary")
+
+epsrc.df$Year <- substr(epsrc.df$Year, 1, 4)
+
+
+
+HESA_ethnicity <- plot_HESA_Comparison.f(
+  HESA_df = hesa.df %>% filter(EthnicityBinary == "Ethnic Minority"),
+  EPSRC_df = epsrc.df %>% filter(EthnicityBinary == "Ethnic Minority"),
+  demographic = "EthnicityBinary",
+  RSSgold,
+  "black",
+  title_text = "Proportion of EPSRC Applicants Who Are Ethnic Minorities\nCompared to HESA Population"
+)
+
+print(HESA_ethnicity)
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/ethnicity_HESA_comparison.png"), 
+       plot = HESA_ethnicity, width = 12, height = 8, dpi = 800, bg = "white")
+
+```
+
+## Age
+
+#### Comparing the 2014/2015 Age Distribution of Researchers in the EPSRC Applicant and HESA Population
+
+(2014/15 to 2022/23. All Unique Researchers)
+
+```{r}
+hesa.df <- HESA$Age.df %>% filter(AgeRange != "Other", AgeRange != "Unknown")
+
+# Collapsing age
+hesa.df <- hesa.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+hesa.df <- calculate_HESA_proportions.f(hesa.df, "AgeRangeCollapsed")
+
+hesa.df$Year <- substr(hesa.df$Year, 1, 4)
+
+df <- EPSRC$Investigators.df %>% filter(AgeRange != "Not Disclosed", AgeRange != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+# Collapsing age
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "AgeRangeCollapsed")
+
+epsrc.df$Year <- substr(epsrc.df$Year, 1, 4)
+
+
+
+age_colors <- c(
+  "35_and_Under" = RSSblue,
+  "36-55" = RSSgold,
+  "56_and_Over" = RSSred
+)
+
+HESA_age <- ggplot() +
+  # Ribbon for HESA data
+  geom_ribbon(
+    data = hesa.df,
+    aes(
+      x = Year,
+      ymin = CI_L_TR,
+      ymax = CI_U_TR,
+      fill = AgeRangeCollapsed,
+      group = AgeRangeCollapsed
+    ),
+    alpha = 0.3
+  ) +
+  # Points for EPSRC data
+  geom_point(
+    data = epsrc.df,
+    aes(
+      x = Year,
+      y = Proportion,
+      color = AgeRangeCollapsed
+    ),
+    size = 3
+  ) +
+  # Error bars for EPSRC data
+  geom_errorbar(
+    data = epsrc.df,
+    aes(
+      x = Year,
+      ymin = CI_L,
+      ymax = CI_U,
+      color = AgeRangeCollapsed
+    ),
+    width = 0.2,
+    size = 1
+  ) +
+  # Y-axis labels as percentages
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  # Custom scales
+  scale_color_manual(
+    values = age_colors,
+    name = "Age Range (EPSRC)"
+  ) +
+  scale_fill_manual(
+    values = age_colors,
+    name = "Age Range (HESA)"
+  ) +
+  scale_x_discrete(breaks = seq(min(epsrc.df$Year), max(epsrc.df$Year), by = 1))  +
+  guides(
+    shape = "none",  # Remove shape legend
+    fill = guide_legend(order = 1),  # Maintain order for Age Range (HESA)
+    color = guide_legend(order = 2)  # Maintain order for Age Range (EPSRC)
+  ) +
+  # Labels and themes
+  labs(
+    title = "Proportion of EPSRC Applicants by Age Range\nCompared to HESA Population",
+    y = "Proportions",
+    x = "Academic Year (Beginning)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    axis.title.x = element_text(size = 22, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 22, margin = margin(r = 15), face = "bold"),
+    axis.text.x = element_text(size = 16, face = "bold", angle = 90),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.box = "vertical",          # Arrange legend items horizontally
+    legend.box.just = "center",         # Center the legend
+    legend.spacing.y = unit(0.3, "cm"), # Adjust vertical spacing between legend elements
+    legend.key.height = unit(0.5, "cm") # Adjust height of legend keys for better spacing
+   )
+
+print(HESA_age)
+
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/age_HESA_comparison.png"), 
+       plot = HESA_age, width = 12, height = 8, dpi = 800, bg = "white")
+
+```
+
+
+
+## Nationality
+
+#### Comparing EPSRC Applicants with HESA Population, by Nationality
+
+(2014/15 to 2022/23. All Unique Researchers)
+
+```{r}
+hesa.df <- calculate_HESA_proportions.f(HESA$Nationality.df %>% filter(NationalityBinary != "Other", NationalityBinary != "Unknown"), "NationalityBinary")
+
+hesa.df$Year <- substr(hesa.df$Year, 1, 4)
+
+df <- EPSRC$Investigators.df %>% filter(NationalityBinary != "Not Disclosed", NationalityBinary != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "NationalityBinary")
+
+epsrc.df$Year <- substr(epsrc.df$Year, 1, 4)
+
+
+
+HESA_nationality <- plot_HESA_Comparison.f(
+  HESA_df = hesa.df %>% filter(NationalityBinary == "Non UK"),
+  EPSRC_df = epsrc.df %>% filter(NationalityBinary == "Non UK"),
+  demographic = "NationalityBinary",
+  RSSgold,
+  "black",
+  title_text = "Proportion EPSRC Applicants Who Are Not from the UK\nCompared to HESA Population"
+)
+
+print(HESA_nationality)
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/nationality_HESA_comparison.png"), 
+       plot = HESA_nationality, width = 12, height = 8, dpi = 800, bg = "white")
+```
+
+## Disability
+
+#### Comparing EPSRC Applicants with HESA Population, by Disclosed Disability
+
+(2014/15 to 2022/23. All Unique Researchers)
+
+```{r}
+hesa.df <- calculate_HESA_proportions.f(HESA$Disability.df %>% filter(Disability != "Other", Disability != "Unknown"), "Disability")
+
+hesa.df$Year <- substr(hesa.df$Year, 1, 4)
+
+df <- EPSRC$Investigators.df %>% filter(Disability != "Not Disclosed", Disability != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "Disability")
+
+epsrc.df$Year <- substr(epsrc.df$Year, 1, 4)
+
+
+
+HESA_disability <- plot_HESA_Comparison.f(
+  HESA_df = hesa.df %>% filter(Disability == "Known Disability"),
+  EPSRC_df = epsrc.df %>% filter(Disability == "Known Disability"),
+  demographic = "Disability",
+  RSSgold,
+  "black",
+  title_text = "Proportion EPSRC Applicants with Known Disabilities\nCompared to HESA Population"
+)
+
+print(HESA_disability)
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/disability_HESA_comparison.png"), 
+       plot = HESA_disability, width = 12, height = 8, dpi = 800, bg = "white")
+```
+
+

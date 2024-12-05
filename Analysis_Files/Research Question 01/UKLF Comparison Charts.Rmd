@@ -1,0 +1,314 @@
+---
+title: "Bias in EPSRC Peer Review - UKLF Comparison Charts"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12)
+
+
+## Libraries
+library(dplyr)      # For tidy coding
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(binom)
+library(purrr)
+library(boot)
+library(dplyr)
+library(reshape2)
+library(knitr)
+library(vcd)
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+note_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Notes/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+table_folder_path   <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Tables/Note01"
+
+
+
+## Set key file names
+raw_data_file       <- "PROJ2023.002-DATA001.xlsx"
+BaselineEnvironment <- "PROJ2023.002 Environment - BASELINE.RData"
+CleanedEnvironment  <- "PROJ2023.002 Environment - CLEANED.RData"
+Sample20Environment <- "PROJ2023.002 Environment - SAMPLE20.RData"
+Sample80Environment <- "PROJ2023.002 Environment - SAMPLE80.RData"
+cleanedExcelFile    <- "PROJ2023.002-DATA002.xlsx"
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+UKLFdata            <- "PROJ2023.002-DATA004.xlsx"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+# {.tabset}
+
+## Defining Functions
+
+```{r confidence_interval_function}
+##Function-----------------------------------------
+# Function to calculate bootstrap CI for proportions
+boot_ci <- function(data, indices) {
+  sampled_data <- data[indices]
+  prop <- mean(sampled_data)
+  return(prop)
+}
+
+# helper Function to compute bootstrapped confidence intervals
+compute_ci <- function(data) {
+  if (length(data) < 2) {
+    return(data.frame(CI_Lower = NA, CI_Upper = NA))
+  }
+  
+  boot_result <- boot(data, boot_ci, R = 1000)
+  ci <- boot.ci(boot_result, type = "basic")
+  return(data.frame(CI_Lower = ci$basic[4], CI_Upper = ci$basic[5]))
+}
+
+# Generalized function to compute counts, proportions, and CIs by group and demographic
+compute_statistics <- function(df, group_col, demo_col) {
+  df <- df %>%
+    rename(Group = !!sym(group_col), Demographic = !!sym(demo_col))
+  
+  groups <- unique(df$Group)
+  results_list <- list()
+  
+  for (group in groups) {
+    group_df <- df %>% filter(Group == group)
+    
+    result <- group_df %>%
+      group_by(Demographic) %>%
+      summarise(
+        Count = n(),
+        Proportion = Count / nrow(group_df)
+      ) %>%
+      ungroup() %>%
+      rowwise() %>%
+      mutate(
+        CI = list(compute_ci(group_df$Demographic == Demographic)),
+        CI_L = CI$CI_Lower,
+        CI_U = CI$CI_Upper
+      ) %>%
+      select(-CI) %>%
+      ungroup() %>%
+      mutate(Year = group)
+    
+    results_list[[group]] <- result
+  }
+  
+  results_df <- bind_rows(results_list) %>%
+    mutate(Group = demo_col)
+  
+  results_df <- results_df %>%
+    rename(!!sym(demo_col) := Demographic)
+  
+  return(results_df)
+}
+
+```
+
+
+```{r}
+plot_uklf_comparison.f <- function(UKLF_prepared, EPSRC_prepared, demographic, c1,c2, ribbon_fade = 0.5) {
+  
+  colors <- c(
+    "UK Labour Force" = c1,
+    "EPSRC" = c2
+  )
+  
+  # Plotting
+  ggplot(UKLF_prepared, aes(x = Year)) +
+    geom_ribbon(
+      data = UKLF_prepared,
+      aes(x = Year, ymin = Lower_CI, fill = "UK Labour Force", ymax = Upper_CI, group = 1),
+      alpha = ribbon_fade
+    ) +
+    geom_point(
+      data = EPSRC_prepared,
+      aes(x = Year, y = Proportion, color = "EPSRC"),
+      shape = 19,
+      size = 3
+    ) +
+    geom_errorbar(
+      data = EPSRC_prepared,
+      aes(x = Year, ymin = CI_L, ymax = CI_U, color = "EPSRC"),
+      width = 0.2
+    ) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 0.1)) +
+    scale_color_manual(values = colors) +
+    labs(
+      y = "Proportions (%)",
+      x = "Year",
+      color = "Population",
+      fill = "95% Confidence Interval"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90), 
+          legend.position = "top") +
+    scale_fill_manual(values = c(
+      "UK Labour Force" = c1,
+      "EPSRC" = c2
+    ))
+}
+
+
+```
+
+
+## Proportion of EPSRC Applicants and UK Labour Force, by Sex
+*(2014/2015 to 2022/2023. Proportion of unique EPSRC applicants (All Roles). Proportion of UK Labour force)*
+
+```{r}
+uklf.df <- UKLF$Sex.df
+
+
+df <- EPSRC$Investigators.df %>% filter(Sex != "Not Disclosed", Sex != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "Sex")
+
+epsrc.df$Year <- as.integer(substr(epsrc.df$Year, 1, 4))
+
+
+UKLF_sex  <- plot_uklf_comparison.f(
+  uklf.df %>% filter(Sex == "Female"),
+  epsrc.df %>% filter(Sex == "Female"),
+  demographic = "Sex",
+  RSSblue,
+  "black"
+)
+
+print(UKLF_sex)
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/sex_UKLF_comparison.png"), 
+       plot = UKLF_sex, width = 12, height = 8, dpi = 800, bg = "white")
+```
+
+
+
+## Proportion of EPSRC Applicants and UK Labour Force, by Ethnicity
+*(2014/2015 to 2022/2023. Proportion of unique EPSRC applicants (All Roles). Proportion of UK Labour force)*
+
+```{r}
+uklf.df <- UKLF$Eth.df %>% 
+  mutate(
+    EthnicityBinary = case_when(
+      EthnicityBinary == "Ethnic Minority" ~ "Ethnic_Minority", ## avoids a " " that throws off the function
+      TRUE ~ EthnicityBinary
+    )
+  )
+
+
+df <- EPSRC$Investigators.df %>% filter(EthnicityBinary != "Not Disclosed", EthnicityBinary != "Unknown") %>% 
+  group_by(FYDecisionDate, AnonINV) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Keep only one unique AnonINV per year
+  ungroup()
+
+epsrc.df <- compute_statistics(df, "FYDecisionDate", "EthnicityBinary")
+
+epsrc.df$Year <- as.integer(substr(epsrc.df$Year, 1, 4))
+
+epsrc.df <- epsrc.df %>% 
+  mutate(
+    EthnicityBinary = case_when(
+      EthnicityBinary == "Ethnic Minority" ~ "Ethnic_Minority", ## avoids a " " that throws off the function
+      TRUE ~ EthnicityBinary
+    )
+  )
+
+
+UKLF_ethnicity  <- plot_uklf_comparison.f(
+  uklf.df %>% filter(EthnicityBinary == "Ethnic_Minority"),
+  epsrc.df %>% filter(EthnicityBinary == "Ethnic_Minority"),
+  demographic = "Ethnic_Minority",
+  RSSblue,
+  "black"
+)
+
+print(UKLF_ethnicity)
+
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/Images/Note01"
+
+ggsave(filename = paste0(figure_folder_path, "/ethnicity_UKLF_comparison.png"), 
+       plot = UKLF_ethnicity, width = 12, height = 8, dpi = 800, bg = "white")
+
+```
+
