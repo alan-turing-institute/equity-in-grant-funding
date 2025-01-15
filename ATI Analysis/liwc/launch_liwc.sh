@@ -1,0 +1,1 @@
+~/software/LIWC-22/opt/liwc-22/bin/LIWC-22-cli --mode wc -d "/data/LIWC-dictionaries/grant-evaluation-dictionary.dicx" --input "/home/ruoyun.hui/ingressed_copy/DATA002_ReviewerCommentsMerged.csv" -ci 6 --output "DATA002_ReviewerComments_granteval.wc.csv"
