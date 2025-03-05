@@ -1,0 +1,1413 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 19"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12, warning = FALSE, messages = FALSE)
+
+
+## Libraries
+library(dplyr)      # For tidy coding
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(dplyr)
+library(rstatix)
+library(DescTools)
+library(boot)
+library(stringr)
+
+
+
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 19"
+
+
+
+
+## Set key file names
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+
+# {.tabset}
+
+## Data Preparation 
+
+```{r data_setup}
+###################################################
+## Set up Data for Unique Individuals by Theme
+###################################################
+# Applicants By Theme -----------------------------------------------------
+df<- EPSRC$Grants.df %>% select(AnonPROJ, AnonTHM)
+df <- df %>%
+  left_join(
+    EPSRC$Investigators.df %>% select(
+      Sex,
+      EthnicityBinary,
+      Disability,
+      NationalityBinary,
+      AgeRange,
+      AnonINV,
+      AnonPROJ
+    ),
+    by = "AnonPROJ"
+  )
+
+Q19thmApplicants.df <- df %>%
+  select(-AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonTHM) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Count applicants only once per theme
+  ungroup()    
+
+
+# Awardees by Theme -------------------------------------------------------
+
+df<- EPSRC$Grants.df %>% filter(GrantOutcome=="Funded") %>%select(AnonPROJ, AnonTHM)
+df <- df %>%
+  left_join(
+    EPSRC$Investigators.df %>% select(
+      Sex,
+      EthnicityBinary,
+      Disability,
+      NationalityBinary,
+      AgeRange,
+      AnonINV,
+      AnonPROJ
+    ),
+    by = "AnonPROJ"
+  )
+
+Q19thmAwardees.df <- df %>%
+  select(-AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonTHM) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Count awardees only once per theme
+  ungroup()
+
+
+# Reviewers by Theme ------------------------------------------------------
+
+
+df <- EPSRC$Grants.df %>% select(AnonPROJ, AnonTHM)
+df <- df %>%
+  right_join(
+    EPSRC$Reviewers.df %>% select(
+      Sex,
+      EthnicityBinary,
+      Disability,
+      NationalityBinary,
+      AgeRange,
+      AnonREV,
+      AnonPROJ
+    ),
+    by = "AnonPROJ"
+  )
+
+Q19thmReviewers.df <- df %>%
+  select(-AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonTHM) %>%
+  distinct(AnonREV, .keep_all = TRUE) %>%    # Count reviewers only once per theme
+  ungroup()
+
+
+# Panelists by Theme ---------------------------------------------------------------
+df<- EPSRC$Grants.df %>% select(AnonPROJ, AnonTHM)
+
+### Get the meeting number
+df <- df %>% right_join( EPSRC$GrantMeeting.df %>% select(AnonMTG, AnonPROJ ),by = "AnonPROJ" )
+df <- df %>% right_join( EPSRC$MeetingParticipants.df%>% select(AnonMTG,
+                                                                Sex,
+                                                                EthnicityBinary,
+                                                                Disability,
+                                                                NationalityBinary,
+                                                                AgeRange,
+                                                                AnonPNL
+                                                                ),
+                                                                by = "AnonMTG" )
+
+### Eliminate Duplicates
+Q19thmPanelists.df <- df %>%
+  select(-AnonMTG, -AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonTHM) %>%
+  distinct(AnonPNL, .keep_all = TRUE) %>%    # Count panelists only once per theme
+  ungroup()
+
+
+
+###################################################
+##Set up Data for Unique Individuals by RAG
+###################################################
+# Applicants By RAG -----------------------------------------------------
+df<- EPSRC$Grants.df %>% select(AnonPROJ)
+df <- df %>% right_join(EPSRC$ResearchAreas.df %>% select(
+                                                          AnonPROJ, 
+                                                          AnonRAG,
+                                                          RAFraction),
+                                                          by = "AnonPROJ")
+
+df <- df %>%
+  group_by(AnonPROJ) %>% 
+  filter(RAFraction == max(RAFraction)) %>% 
+  distinct(AnonRAG, .keep_all = TRUE) %>%
+  ungroup()
+
+
+df <- df %>%
+  left_join(
+    EPSRC$Investigators.df %>% select(
+      Sex,
+      EthnicityBinary,
+      Disability,
+      NationalityBinary,
+      AgeRange,
+      AnonINV,
+      AnonPROJ
+    ),
+    by = "AnonPROJ"
+  )
+
+
+
+Q19RAGApplicants.df <- df %>%
+  select(-AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonRAG) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Count applicants only once per research area
+  ungroup()
+
+
+# Awardees by RAG -------------------------------------------------------
+
+df<- EPSRC$Grants.df %>% filter(GrantOutcome =="Funded") %>% select(AnonPROJ)
+df <- df %>% inner_join(EPSRC$ResearchAreas.df %>% select(
+  AnonPROJ, 
+  AnonRAG,
+  RAFraction),
+  by = "AnonPROJ")
+
+df <- df %>%
+  group_by(AnonPROJ) %>% 
+  filter(RAFraction == max(RAFraction)) %>% 
+  distinct(AnonRAG, .keep_all = TRUE) %>%
+  ungroup()
+
+df <- df %>%
+  left_join(
+    EPSRC$Investigators.df %>% select(
+      Sex,
+      EthnicityBinary,
+      Disability,
+      NationalityBinary,
+      AgeRange,
+      AnonINV,
+      AnonPROJ
+    ),
+    by = "AnonPROJ"
+  )
+
+Q19RAGAwardees.df <- df %>%
+  select(-AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonRAG) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%    # Count awardees only once per RAG
+  ungroup()
+
+
+# Reviewers by RAG ------------------------------------------------------
+
+
+df <- EPSRC$Grants.df %>% select(AnonPROJ)
+df <- df %>% right_join(EPSRC$ResearchAreas.df %>% select(
+  AnonPROJ, 
+  AnonRAG,
+  RAFraction),
+  by = "AnonPROJ")
+
+df <- df %>%
+  group_by(AnonPROJ) %>% 
+  filter(RAFraction == max(RAFraction)) %>% 
+  distinct(AnonRAG, .keep_all = TRUE) %>%
+  ungroup()
+
+df <- df %>%
+  right_join(
+    EPSRC$Reviewers.df %>% select(
+      Sex,
+      EthnicityBinary,
+      Disability,
+      NationalityBinary,
+      AgeRange,
+      AnonREV,
+      AnonPROJ
+    ),
+    by = "AnonPROJ"
+  )
+
+Q19RAGReviewers.df <- df %>%
+  select(-AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonRAG) %>%
+  distinct(AnonREV, .keep_all = TRUE) %>%    # Count reviewers only once per RAG
+  ungroup()
+
+
+# Panelists by RAG ---------------------------------------------------------------
+df<- EPSRC$Grants.df %>% select(AnonPROJ)
+
+df <- df %>% right_join(EPSRC$ResearchAreas.df %>% select(
+  AnonPROJ, 
+  AnonRAG,
+  RAFraction),
+  by = "AnonPROJ")
+
+df <- df %>%
+  group_by(AnonPROJ) %>% 
+  filter(RAFraction == max(RAFraction)) %>% 
+  distinct(AnonRAG, .keep_all = TRUE) %>%
+  ungroup()
+
+
+### Get the meeting number
+df <- df %>% right_join( EPSRC$GrantMeeting.df %>% select(AnonMTG, AnonPROJ ),by = "AnonPROJ" )
+df <- df %>% right_join( EPSRC$MeetingParticipants.df%>% select(AnonMTG,
+                                                                Sex,
+                                                                EthnicityBinary,
+                                                                Disability,
+                                                                NationalityBinary,
+                                                                AgeRange,
+                                                                AnonPNL
+),
+by = "AnonMTG" )
+
+### Eliminate Duplicates
+Q19RAGPanelists.df <- df %>%
+  select(-AnonMTG, -AnonPROJ) %>%                      # Drop the AnonPROJ column
+  group_by(AnonRAG) %>%
+  distinct(AnonPNL, .keep_all = TRUE) %>%    # Count panelists only once per RAG
+  ungroup()
+
+
+
+### Adding intersectional sex with ethnicity
+Q19RAGApplicants.df$Sex_Ethnicity <- interaction(Q19RAGApplicants.df$Sex, Q19RAGApplicants.df$EthnicityBinary)
+Q19RAGAwardees.df$Sex_Ethnicity <- interaction(Q19RAGAwardees.df$Sex, Q19RAGAwardees.df$EthnicityBinary)
+Q19RAGPanelists.df$Sex_Ethnicity <- interaction(Q19RAGPanelists.df$Sex, Q19RAGPanelists.df$EthnicityBinary)
+Q19RAGReviewers.df$Sex_Ethnicity <- interaction(Q19RAGReviewers.df$Sex, Q19RAGReviewers.df$EthnicityBinary)
+
+Q19thmApplicants.df$Sex_Ethnicity <- interaction(Q19thmApplicants.df$Sex, Q19thmApplicants.df$EthnicityBinary)
+Q19thmAwardees.df$Sex_Ethnicity <- interaction(Q19thmAwardees.df$Sex, Q19thmAwardees.df$EthnicityBinary)
+Q19thmPanelists.df$Sex_Ethnicity <- interaction(Q19thmPanelists.df$Sex, Q19thmPanelists.df$EthnicityBinary)
+Q19thmReviewers.df$Sex_Ethnicity <- interaction(Q19thmReviewers.df$Sex, Q19thmReviewers.df$EthnicityBinary)
+
+
+#Getting AgeRangeCollapsed
+Q19RAGApplicants.df <- Q19RAGApplicants.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q19RAGAwardees.df <- Q19RAGAwardees.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q19RAGPanelists.df <- Q19RAGPanelists.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q19RAGReviewers.df <- Q19RAGReviewers.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+
+
+
+Q19thmApplicants.df <- Q19thmApplicants.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q19thmAwardees.df <- Q19thmAwardees.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q19thmPanelists.df <- Q19thmPanelists.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+Q19thmReviewers.df <- Q19thmReviewers.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+
+```
+
+```{r}
+## For the purposes of the report, EPSRC requested not having gaps between the presented RAGs. These organically arise in two places - RAG-04 is their NULL RAG, and was not included in the raw data. RAG-01 has too few observations in the raw data to reasonably analyse.
+
+Q19RAGApplicants.df <- Q19RAGApplicants.df %>% filter(AnonRAG != "RAG-01") %>% 
+  mutate(AnonRAG = case_when(AnonRAG == "RAG-02" ~ "RAG-01",
+                             AnonRAG == "RAG-03" ~ "RAG-02",
+                             AnonRAG == "RAG-05" ~ "RAG-03",
+                             AnonRAG == "RAG-06" ~ "RAG-04",
+                             AnonRAG == "RAG-07" ~ "RAG-05",
+                             AnonRAG == "RAG-08" ~ "RAG-06",
+                             AnonRAG == "RAG-09" ~ "RAG-07",
+                             AnonRAG == "RAG-10" ~ "RAG-08",
+                             AnonRAG == "RAG-11" ~ "RAG-09",
+                             TRUE ~ AnonRAG))
+
+Q19RAGAwardees.df <- Q19RAGAwardees.df %>% filter(AnonRAG != "RAG-01") %>% 
+  mutate(AnonRAG = case_when(AnonRAG == "RAG-02" ~ "RAG-01",
+                             AnonRAG == "RAG-03" ~ "RAG-02",
+                             AnonRAG == "RAG-05" ~ "RAG-03",
+                             AnonRAG == "RAG-06" ~ "RAG-04",
+                             AnonRAG == "RAG-07" ~ "RAG-05",
+                             AnonRAG == "RAG-08" ~ "RAG-06",
+                             AnonRAG == "RAG-09" ~ "RAG-07",
+                             AnonRAG == "RAG-10" ~ "RAG-08",
+                             AnonRAG == "RAG-11" ~ "RAG-09",
+                             TRUE ~ AnonRAG))
+
+Q19RAGPanelists.df <- Q19RAGPanelists.df %>% filter(AnonRAG != "RAG-01") %>% 
+  mutate(AnonRAG = case_when(AnonRAG == "RAG-02" ~ "RAG-01",
+                             AnonRAG == "RAG-03" ~ "RAG-02",
+                             AnonRAG == "RAG-05" ~ "RAG-03",
+                             AnonRAG == "RAG-06" ~ "RAG-04",
+                             AnonRAG == "RAG-07" ~ "RAG-05",
+                             AnonRAG == "RAG-08" ~ "RAG-06",
+                             AnonRAG == "RAG-09" ~ "RAG-07",
+                             AnonRAG == "RAG-10" ~ "RAG-08",
+                             AnonRAG == "RAG-11" ~ "RAG-09",
+                             TRUE ~ AnonRAG))
+
+Q19RAGReviewers.df <- Q19RAGReviewers.df %>% filter(AnonRAG != "RAG-01") %>% 
+  mutate(AnonRAG = case_when(AnonRAG == "RAG-02" ~ "RAG-01",
+                             AnonRAG == "RAG-03" ~ "RAG-02",
+                             AnonRAG == "RAG-05" ~ "RAG-03",
+                             AnonRAG == "RAG-06" ~ "RAG-04",
+                             AnonRAG == "RAG-07" ~ "RAG-05",
+                             AnonRAG == "RAG-08" ~ "RAG-06",
+                             AnonRAG == "RAG-09" ~ "RAG-07",
+                             AnonRAG == "RAG-10" ~ "RAG-08",
+                             AnonRAG == "RAG-11" ~ "RAG-09",
+                             TRUE ~ AnonRAG))
+
+```
+
+```{r confidence_interval_function}
+##Function-----------------------------------------
+# Function to calculate bootstrap CI for proportions
+boot_ci <- function(data, indices) {
+  sampled_data <- data[indices]
+  prop <- mean(sampled_data)
+  return(prop)
+}
+
+# Function to compute bootstrapped confidence intervals
+compute_ci <- function(data) {
+  if (length(data) < 2) {
+    return(data.frame(CI_Lower = NA, CI_Upper = NA))
+  }
+  
+  boot_result <- boot(data, boot_ci, R = 1000)
+  ci <- boot.ci(boot_result, type = "basic")
+  return(data.frame(CI_Lower = ci$basic[4], CI_Upper = ci$basic[5]))
+}
+
+# Generalized function to compute counts, proportions, and CIs by group and demographic
+compute_statistics <- function(df, group_col, demo_col) {
+  df <- df %>%
+    rename(Group = !!sym(group_col), Demographic = !!sym(demo_col))
+  
+  groups <- unique(df$Group)
+  results_list <- list()
+  
+  for (group in groups) {
+    group_df <- df %>% filter(Group == group)
+    
+    result <- group_df %>%
+      group_by(Demographic) %>%
+      summarise(
+        Count = n(),
+        Proportion = Count / nrow(group_df)
+      ) %>%
+      ungroup() %>%
+      rowwise() %>%
+      mutate(
+        CI = list(compute_ci(group_df$Demographic == Demographic)),
+        CI_L = CI$CI_Lower,
+        CI_U = CI$CI_Upper
+      ) %>%
+      select(-CI) %>%
+      ungroup() %>%
+      mutate(Theme = group)
+    
+    results_list[[group]] <- result
+  }
+  
+  results_df <- bind_rows(results_list)
+  results_df <- bind_rows(results_list) %>%
+    mutate(Group = demo_col)
+  
+  return(results_df)
+}
+
+
+
+```
+
+```{r table_rounding_function}
+# Function to round columns as specified
+round_columns <- function(df) {
+  df <- df %>%
+    mutate(
+      Count = ifelse(Count < 6, "\u22645", round(Count / 5) * 5),
+      across(where(is.numeric) & !c(Count), ~ ifelse(Count == "\u22645", "~", round(., 1)))
+    )
+  return(df)
+}
+
+```
+
+
+
+
+## Applicants {.tabset}
+
+
+#### Table 19.01 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Applicants
+
+```{r}
+## Applicants conf-int Table
+
+df_sex <- Q19RAGApplicants.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19RAGApplicants.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19RAGApplicants.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19RAGApplicants.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19RAGApplicants.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19RAGApplicants.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+t3 <- compute_statistics(df_sex, "AnonRAG", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonRAG", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonRAG", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonRAG", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonRAG", "AgeRangeCollapsed"))
+
+table19.01 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.01)
+
+```
+
+#### Figure 19.01 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Applicants
+
+```{r, fig.height=12}
+### Applicants
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.01 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Applicants Per RAG by Demographic",
+       x = element_blank(),
+       y = "Percentage of Applicants in RAG") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.01)
+
+```
+
+#### Table 19.02 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Theme, Applicants
+
+```{r}
+## Applicants conf-int Table
+
+df_sex <- Q19thmApplicants.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19thmApplicants.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19thmApplicants.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19thmApplicants.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19thmApplicants.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19thmApplicants.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+
+t3 <- compute_statistics(df_sex, "AnonTHM", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonTHM", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonTHM", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonTHM", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonTHM", "AgeRangeCollapsed"))
+
+
+table19.02 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.02)
+
+```
+
+#### Figure 19.02 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Theme, Applicants
+
+```{r, fig.height=16}
+### Applicants
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.02 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Applicants Per Theme by Demographic",
+       x = element_blank(),
+       y = "Proportion of Applicants in Theme") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.02)
+
+```
+
+
+## Awardees {.tabset}
+
+#### Table 19.03 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Awardees
+
+```{r}
+## Awardees conf-int Table
+
+df_sex <- Q19RAGAwardees.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19RAGAwardees.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19RAGAwardees.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19RAGAwardees.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19RAGAwardees.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19RAGAwardees.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+
+t3 <- compute_statistics(df_sex, "AnonRAG", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonRAG", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonRAG", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonRAG", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonRAG", "AgeRangeCollapsed"))
+
+table19.03 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.03)
+
+```
+
+#### Figure 19.03 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Awardees
+
+```{r, fig.height=12}
+### Awardees
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.03 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Awardees Per RAG by Demographic",
+       x = element_blank(),
+       y = "Proportion of Awardees in RAG") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.03)
+
+```
+
+#### Table 19.04 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Theme, Awardees
+
+```{r}
+## Awardees conf-int Table
+
+df_sex <- Q19thmAwardees.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19thmAwardees.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19thmAwardees.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19thmAwardees.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19thmAwardees.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19thmAwardees.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+
+t3 <- compute_statistics(df_sex, "AnonTHM", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonTHM", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonTHM", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonTHM", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonTHM", "AgeRangeCollapsed"))
+
+table19.04 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.04)
+
+```
+
+#### Figure 19.04 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Theme, Awardees
+
+```{r, fig.height=16}
+### Awardees
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.04 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Awardees Per Theme by Demographic",
+       x = element_blank(),
+       y = "Proportion of Awardees in Theme") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.04)
+
+```
+
+
+
+
+## Reviewers {.tabset}
+
+#### Table 19.05 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Reviewers
+
+```{r}
+## Reviewers conf-int Table
+
+df_sex <- Q19RAGReviewers.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19RAGReviewers.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19RAGReviewers.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19RAGReviewers.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19RAGReviewers.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19RAGReviewers.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+t3 <- compute_statistics(df_sex, "AnonRAG", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonRAG", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonRAG", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonRAG", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonRAG", "AgeRangeCollapsed"))
+
+table19.05 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.05)
+
+```
+
+#### Figure 19.05 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Reviewers
+
+```{r, fig.height=12}
+### Reviewers
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.05 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Reviewers Per RAG by Demographic",
+       x = element_blank(),
+       y = "Proportion of Reviewers in RAG") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.05)
+
+```
+
+#### Table 19.06 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Theme, Reviewers
+
+```{r}
+## Reviewers conf-int Table
+
+df_sex <- Q19thmAwardees.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19thmAwardees.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19thmAwardees.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19thmAwardees.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19thmAwardees.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19thmAwardees.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+t3 <- compute_statistics(df_sex, "AnonTHM", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonTHM", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonTHM", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonTHM", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonTHM", "AgeRangeCollapsed"))
+
+table19.06 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.06)
+
+```
+
+#### Figure 19.06 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Theme, Reviewers
+
+```{r, fig.height=16}
+### Reviewers
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.06 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Reviewers Per Theme by Demographic",
+       x = element_blank(),
+       y = "Proportion of Reviewers in Theme") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.06)
+
+```
+
+
+## Panelists {.tabset}
+
+#### Table 19.07 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Panelists
+
+```{r}
+## Panelists conf-int Table
+
+df_sex <- Q19RAGPanelists.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19RAGPanelists.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19RAGPanelists.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19RAGPanelists.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19RAGPanelists.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19RAGPanelists.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+t3 <- compute_statistics(df_sex, "AnonRAG", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonRAG", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonRAG", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonRAG", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonRAG", "AgeRangeCollapsed"))
+
+table19.07 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.07)
+
+```
+
+#### Figure 19.07 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Research Area, Panelists
+
+```{r, fig.height=12}
+### Panelists
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35 and Under" = col_age1,
+    "36-55" = col_age3,
+    "56 and Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.07 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Panellists Per RAG by Demographic",
+       x = element_blank(),
+       y = "Proportion of Panellists in RAG") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.07)
+
+```
+
+#### Table 19.08 Counts, Proportions, and Confidence Intervals for Demographic Proportions by Theme, Panelists
+
+```{r}
+## Panelists conf-int Table
+
+df_sex <- Q19thmPanelists.df %>% filter(Sex != "Unknown" & Sex != "Not Disclosed")
+df_ethnicity <- Q19thmPanelists.df %>% filter(EthnicityBinary != "Unknown" & EthnicityBinary != "Not Disclosed")
+df_nationality <- Q19thmPanelists.df %>% filter(NationalityBinary != "Unknown" & NationalityBinary != "Not Disclosed")
+df_disability <- Q19thmPanelists.df %>% filter(Disability != "Unknown" & Disability != "Not Disclosed")
+df_sex_ethnicity <- Q19thmPanelists.df %>% filter(!str_detect(Sex_Ethnicity, "Unknown|Not Disclosed"))
+df_age <- Q19thmPanelists.df %>% filter(!str_detect(AgeRangeCollapsed, "Unknown|Not Disclosed"), !is.na(AgeRangeCollapsed))
+
+
+
+t3 <- compute_statistics(df_sex, "AnonTHM", "Sex")
+t3 <- rbind(t3,compute_statistics(df_ethnicity, "AnonTHM", "EthnicityBinary"))
+t3 <- rbind(t3,compute_statistics(df_nationality, "AnonTHM", "NationalityBinary"))
+t3 <- rbind(t3,compute_statistics(df_disability, "AnonTHM", "Disability"))
+t3 <- rbind(t3, compute_statistics(df_age, "AnonTHM", "AgeRangeCollapsed"))
+
+table19.08 <- t3 %>%
+  mutate(Count = if_else(Count < 30, "<30", as.character(round(Count / 10) * 10)))
+
+kable(table19.08)
+
+```
+
+#### Figure 19.08 Plot of Proportions, and Confidence Intervals for Demographic Proportions by Theme, Panelists
+
+```{r, fig.height=16}
+### Panelists
+plot_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSblue   ,    
+    "No Known Disability"=RSSred  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"=col_unknown  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "35_and_Under" = col_age1,
+    "36-55" = col_age3,
+    "56_and_Over" = col_age5,
+    "Male.White"=RSSblue, 
+    "Female.White"=RSSred, 
+    "Male.Ethnic Minority"=RSSlightblue, 
+    "Female.Ethnic Minority"=RSSgold, 
+    "Other"=col_other
+  )
+
+
+t3 <- t3 %>% mutate(
+  Group = case_when(
+    Group == "EthnicityBinary" ~ "Ethnicity",
+    Group == "AgeRangeCollapsed" ~ "Age Range",
+    Group == "NationalityBinary" ~ "Nationality",
+    TRUE ~ Group
+  )
+)
+
+# Plot the CIs, faceted by Group, colored by Demographic, with dodged positions
+fig19.08 <- ggplot(t3 %>% filter(Group != "Disability"), aes(x = Theme, y = Proportion, color = Demographic)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), 
+                position = position_dodge(width = 0.3), 
+                width = 0.2) +
+
+  facet_wrap(~ Group, ncol = 1, scales = 'free') +
+  scale_color_manual(values = plot_colors) +
+  labs(title = "Share of Panellists Per Theme by Demographic",
+       x = element_blank(),
+       y = "Proportion of Panellists in Theme") +
+  scale_y_continuous(limits = c(0,1), 
+                     labels = scales::percent_format(accuracy = 1)) +
+  
+  theme(plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+        plot.title.position = "plot",
+        axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+        axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(size = 16, face = "bold"),
+        axis.text.y = element_text(size = 16, face = "bold"),
+        legend.position = "top",
+        legend.text = element_text(size = 16, face = "bold"),
+        legend.title = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+        panel.grid.minor = element_blank(),
+        strip.text = element_text(size = 16, face = "bold")
+    ) +
+  coord_flip()
+
+print(fig19.08)
+
+```
+
+
+```{r save plots, echo = FALSE, eval=FALSE, include=FALSE}
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 19"
+
+plotnumbers <- c(19.01, 19.02, 19.03, 19.04, 19.05, 19.06, 19.07, 19.08)
+
+save_plot.f(plotnumbers, 
+            figure_folder_path, 
+            dpi = 600,            
+            width = 1200, 
+            height = 1200, 
+            units = "mm", 
+            scale = .25,
+            format = ".png"       
+)
+```

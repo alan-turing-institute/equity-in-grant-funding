@@ -1,0 +1,891 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 5"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12, warning = FALSE, message = FALSE)
+
+
+## Libraries
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(broom)
+library(lme4)
+library(broom)
+library(pscl)  # For pR2 function
+library(pROC)  # For ROC AUC
+library(ModelMetrics)  # For Brier Score
+library(DescTools) 
+library(tidyverse)
+library(boot)
+library(ggrepel)
+library(dplyr)
+library(performance)
+library(margins)
+
+
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05"
+
+
+
+## Set key file names
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+
+# {.tabset}
+
+## Data Preparation
+
+```{r}
+## This dataframe will include Grant (rather than unique researcher)
+
+## 1.1 Select columns from Grants.df
+Grants_selected.df <- EPSRC$Grants.df %>%
+  select(AnonPROJ,
+         GrantCategory,
+         GrantOutcome,
+         AdjustedApplicationValue,
+         Driver,
+         AnonREG
+  )
+
+
+## 1.2 Now select additional columns from PrincipalInvestigators.df
+PI_details.df <- EPSRC$PI.df %>%
+  select(
+    AnonPROJ,
+    AnonINV,
+    Sex,
+    AgeRange,
+    Disability,
+    EthnicGroup,
+    EthnicityBinary,
+    NationalityBinary,
+    AnonTHM,
+    Role
+  )
+
+
+## 1.3 Merge with PrincipalInvestigators.df
+Q5Grants.df <- left_join(PI_details.df,
+                         Grants_selected.df ,
+                         by = "AnonPROJ"
+)
+
+
+## 1.4 Cleanup
+rm(PI_details.df, 
+   Grants_selected.df
+)
+
+## Add a binary Outcome variable for Funded/Unfunded
+Q5Grants.df$BinaryOutcome <- ifelse(Q5Grants.df$GrantOutcome == "Funded", "Funded", "Unfunded")
+
+
+#Fundable by score
+# Group by AnonPROJ and count the number of TRUE and FALSE FundableByScore values
+result <- EPSRC$GrantMeeting.df %>%
+  mutate(Fundablebyscore = FundableByScore)
+  
+result <- result %>% 
+  group_by(AnonPROJ) %>%
+  dplyr::summarise(
+    TRUE_count = sum(Fundablebyscore == TRUE, na.rm = TRUE),
+    FALSE_count = sum(Fundablebyscore == FALSE, na.rm = TRUE)
+  ) %>%
+  filter(FALSE_count == 0 & !is.na(FALSE_count))  # Keep rows where FALSE_count is 0 and not NA
+
+
+## Add to Q5Grants.df
+Q5Grants.df <- Q5Grants.df %>%
+  left_join(result, by = "AnonPROJ") %>%
+  mutate(Fundability = case_when(
+    GrantOutcome == "Funded" ~ "Funded",
+    !is.na(TRUE_count) & TRUE_count != 0 ~ "Fundable",
+    TRUE ~ "Not Fundable"
+  )) %>%
+  select(-TRUE_count, -FALSE_count) 
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+Q5Grants.df <- Q5Grants.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over",
+                                       AgeRange == "Unknown" ~ "Unknown"))
+
+```
+
+
+## Proportions of Demographic Groups That Are Funded {.tabset}
+
+### Funded and Fundability Rates within Demographics, Separating Research Grants from Fellowships
+
+```{r}
+# Compare Pops ------------------------------------------------------------
+# Function to compute confidence intervals for proportions for each level of Fundability
+compute_fundability_ci <- function(df, num_bootstrap_replicates = 1000) {
+  # Total count of rows in the dataframe
+  total_count <- nrow(df)
+  
+  if (total_count == 0) {
+  return(data.frame(Fundability = character(0), Count = numeric(0), Proportion = numeric(0), CI_L = numeric(0), CI_U = numeric(0)))
+  }
+  
+  # Define bootstrap function to calculate the proportion of a specific Fundability level
+  bootstrap_proportion <- function(data, indices, fundability_level) {
+    d <- data[indices, ]
+    return(sum(d$Fundability == fundability_level) / total_count)
+  }
+  
+  # Initialize a list to store the results
+  results <- list()
+  
+  # Levels of Fundability
+  fundability_levels <- c("Funded", "Fundable", "Not Fundable")
+  
+  # Compute CIs for each Fundability level
+  for (fundability in fundability_levels) {
+    # Subset the dataframe for the current level of Fundability
+    subset_df <- df %>% filter(Fundability == fundability)
+    
+    # Calculate the count and proportion
+    count <- nrow(subset_df)
+    proportion <- count / total_count
+    
+    # Compute bootstrap confidence intervals
+    boot_obj <- boot(data = df, statistic = function(data, indices) {
+      bootstrap_proportion(data, indices, fundability)
+    }, R = num_bootstrap_replicates)
+    
+    ci <- boot.ci(boot_obj, type = "perc")
+    results[[fundability]] <- data.frame(
+      Fundability = fundability,
+      Count = count,
+      Proportion = proportion,
+      CI_L = ci$percent[4],
+      CI_U = ci$percent[5]
+    )
+  }
+  
+  # Combine the results into a single dataframe
+  final_results <- bind_rows(results)
+  
+  return(final_results)
+}
+
+# Function to iterate compute_fundability_ci over each level of demo_column
+compute_fundability_ci_by_demo <- function(df, demo_column, num_bootstrap_replicates = 1000) {
+  # Get unique levels of the demographic column
+  demo_levels <- unique(df[[demo_column]])
+  
+  # Initialize a list to store the results for each demo level
+  all_results <- list()
+  
+  # Iterate over each level of the demographic column
+  for (demo_level in demo_levels) {
+    # Subset the dataframe for the current level of the demographic column
+    subset_df <- df %>% filter(df[[demo_column]] == demo_level)
+    
+    # Compute the CIs for the current subset
+    ci_results <- compute_fundability_ci(subset_df, num_bootstrap_replicates)
+    
+    # Add the demographic level to the results
+    ci_results <- ci_results %>% mutate(Demographic = demo_level)
+    
+    # Store the results in the list
+    all_results[[demo_level]] <- ci_results
+  }
+  
+  # Combine the results into a single dataframe
+  final_results <- bind_rows(all_results) %>%
+    mutate(Group = demo_column)  # Add the Group column
+  
+  return(final_results)
+}
+
+df <- Q5Grants.df %>% filter(Role == "Principal Investigator")
+
+df_sex_known <- df %>% filter(Sex != "Unknown", Sex != "Not Disclosed")
+df_ethn_known <- df %>% filter(EthnicityBinary != "Unknown", EthnicityBinary != "Not Disclosed")
+df_nationality_known <- df %>% filter(NationalityBinary != "Unknown", NationalityBinary != "Not Disclosed")
+df_disability_known <- df %>% filter(Disability != "Unknown", Disability != "Not Disclosed")
+df_age_known <- df %>% filter(AgeRange != "Unknown", AgeRange != "Not Disclosed", !is.na(AgeRange))
+
+t1 <- compute_fundability_ci_by_demo(df_sex_known, "Sex")
+t1 <- rbind(t1, compute_fundability_ci_by_demo(df_ethn_known, "EthnicityBinary"))
+t1 <- rbind(t1, compute_fundability_ci_by_demo(df_nationality_known, "NationalityBinary"))
+t1 <- rbind(t1, compute_fundability_ci_by_demo(df_disability_known, "Disability"))
+t1 <- rbind(t1, compute_fundability_ci_by_demo(df_age_known, "AgeRangeCollapsed"))
+
+t1$Application_Type <- "Research Grants"
+
+df <- Q5Grants.df %>% filter(Role == "Fellow")
+
+df_sex_known <- df %>% filter(Sex != "Unknown", Sex != "Not Disclosed")
+df_ethn_known <- df %>% filter(EthnicityBinary != "Unknown", EthnicityBinary != "Not Disclosed")
+df_nationality_known <- df %>% filter(NationalityBinary != "Unknown", NationalityBinary != "Not Disclosed")
+df_disability_known <- df %>% filter(Disability != "Unknown", Disability != "Not Disclosed")
+df_age_known <- df %>% filter(AgeRange != "Unknown", AgeRange != "Not Disclosed", !is.na(AgeRange))
+
+t2 <- compute_fundability_ci_by_demo(df_sex_known, "Sex")
+t2 <- rbind(t2, compute_fundability_ci_by_demo(df_ethn_known, "EthnicityBinary"))
+t2 <- rbind(t2, compute_fundability_ci_by_demo(df_nationality_known, "NationalityBinary"))
+t2 <- rbind(t2, compute_fundability_ci_by_demo(df_disability_known, "Disability"))
+t2 <- rbind(t2, compute_fundability_ci_by_demo(df_age_known, "AgeRangeCollapsed"))
+
+t2$Application_Type <- "Fellowships"
+
+combined_table <- rbind(t1, t2)
+
+combined_table <- combined_table %>% 
+  mutate(Fundability = factor(Fundability, levels = c("Funded", "Fundable", "Not Fundable")))
+
+
+```
+
+
+
+```{r}
+custom_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,   
+    "Undisclosed Nationality" = RSSmidgrey,
+    "Known Disability"=RSSred   ,    
+    "No Known Disability"=RSSblue  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "56 and Over" = col_5665,
+    "36-55" = col_3645,
+    "35 and Under" = col_2635
+  )
+```
+
+#### Fundability by Sex with Confidence Intervals
+
+```{r}
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "Sex")
+
+sex_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications, by PI Sex",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+sex_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/sex_fundability.png"), 
+       plot = sex_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+#### Fundability by Ethnicity with Confidence Intervals
+
+```{r}
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "EthnicityBinary")
+
+ethnicity_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications, by PI Ethnicity",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+ethnicity_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/ethnicity_fundability.png"), 
+       plot = ethnicity_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+
+#### Fundability by Age with Confidence Intervals
+
+```{r}
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "AgeRangeCollapsed")
+
+age_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications,\nby PI Age Group",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+age_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/age_fundability.png"), 
+       plot = age_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+
+#### Fundability by Nationality with Confidence Intervals
+
+```{r}
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "NationalityBinary")
+
+nationality_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications,\nby PI Nationality",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+nationality_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/nationality_fundability.png"), 
+       plot = nationality_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+
+
+#### Fundability by Disability with Confidence Intervals
+
+```{r}
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "Disability")
+
+disability_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications,\nby PI Disability",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+disability_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/disability_fundability.png"), 
+       plot = disability_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+
+##Intersections
+
+```{r Intersectional Component}
+
+## Research Grants
+df <- Q5Grants.df %>% filter(Role == "Principal Investigator")
+
+# Collapsing age 
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+# Creating dataframe for intersectional analysis
+df_sex_ethnicity <- df %>% 
+  filter(Sex != "Unknown", Sex != "Not Disclosed", EthnicityBinary != "Unknown", EthnicityBinary != "Not Disclosed") %>%
+  mutate(Sex_Ethnicity = interaction(Sex, EthnicityBinary)) %>% 
+  select(AnonPROJ, Sex_Ethnicity, Fundability)
+
+df_sex_age <- df %>% 
+  filter(Sex != "Unknown", Sex != "Not Disclosed", AgeRangeCollapsed != "Unknown", AgeRangeCollapsed != "Not Disclosed", ) %>%
+  mutate(Sex_Age = interaction(Sex, AgeRangeCollapsed)) %>% 
+  select(AnonPROJ, Sex_Age, Fundability)
+
+df_ethnicity_age <- df %>% 
+  filter(EthnicityBinary != "Unknown", EthnicityBinary != "Not Disclosed", AgeRangeCollapsed != "Unknown", AgeRangeCollapsed != "Not Disclosed") %>%
+  mutate(Ethnicity_Age = interaction(EthnicityBinary, AgeRangeCollapsed)) %>% 
+  select(AnonPROJ, Ethnicity_Age, Fundability)
+
+
+t1 <- compute_fundability_ci_by_demo(df_sex_ethnicity, "Sex_Ethnicity")
+t1 <- rbind(t1, compute_fundability_ci_by_demo(df_sex_age, "Sex_Age"))
+t1 <- rbind(t1, compute_fundability_ci_by_demo(df_ethnicity_age, "Ethnicity_Age"))
+
+
+t1$Application_Type <- "Research Grants"
+
+
+
+
+## Fellowships
+df <- Q5Grants.df %>% filter(Role == "Fellow")
+
+# Collapsing age 
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35 and Under", 
+                                       AgeRange == "26-35" ~ "35 and Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56 and Over",
+                                       AgeRange == "66+" ~  "56 and Over"))
+
+# Creating dataframe for intersectional analysis
+df_sex_ethnicity <- df %>% 
+  filter(Sex != "Unknown", Sex != "Not Disclosed", EthnicityBinary != "Unknown", EthnicityBinary != "Not Disclosed") %>%
+  mutate(Sex_Ethnicity = interaction(Sex, EthnicityBinary)) %>% 
+  select(AnonPROJ, Sex_Ethnicity, Fundability)
+
+df_sex_age <- df %>% 
+  filter(Sex != "Unknown", Sex != "Not Disclosed", AgeRangeCollapsed != "Unknown", AgeRangeCollapsed != "Not Disclosed", ) %>%
+  mutate(Sex_Age = interaction(Sex, AgeRangeCollapsed)) %>% 
+  select(AnonPROJ, Sex_Age, Fundability)
+
+df_ethnicity_age <- df %>% 
+  filter(EthnicityBinary != "Unknown", EthnicityBinary != "Not Disclosed", AgeRangeCollapsed != "Unknown", AgeRangeCollapsed != "Not Disclosed") %>%
+  mutate(Ethnicity_Age = interaction(EthnicityBinary, AgeRangeCollapsed)) %>% 
+  select(AnonPROJ, Ethnicity_Age, Fundability)
+
+
+t2 <- compute_fundability_ci_by_demo(df_sex_ethnicity, "Sex_Ethnicity")
+t2 <- rbind(t2, compute_fundability_ci_by_demo(df_sex_age, "Sex_Age"))
+t2 <- rbind(t2, compute_fundability_ci_by_demo(df_ethnicity_age, "Ethnicity_Age"))
+
+
+t2$Application_Type <- "Fellowships"
+
+
+# # Filter for each interaction variable to ensure more than one row per level of Fundability (necessary for the function to work)
+# df_filtered_sex_ethnicity <- df_intersections %>%
+#   group_by(Sex_Ethnicity) %>%
+#   filter(n_distinct(Fundability) > 1) %>%
+#   ungroup()
+# 
+# df_filtered_sex_age <- df_intersections %>%
+#   group_by(Sex_Age) %>%
+#   filter(n_distinct(Fundability) > 1) %>%
+#   ungroup()
+# 
+# df_filtered_ethnicity_age <- df_intersections %>%
+#   group_by(Ethnicity_Age) %>%
+#   filter(n_distinct(Fundability) > 1) %>%
+#   ungroup()
+
+```
+
+```{r}
+combined_table <- rbind(t1, t2)
+
+combined_table <- combined_table %>% 
+  mutate(Fundability = factor(Fundability, levels = c("Funded", "Fundable", "Not Fundable")))
+
+
+```
+
+### Sex + Ethnicity
+
+```{r}
+# Define custom colors
+custom_colors <- c(
+    "Male.White"= RSSblue,      
+    "Male.Ethnic Minority"= RSSlightblue,    
+    "Female.White"= RSSred   ,    
+    "Female.Ethnic Minority"= RSSgold
+  )
+
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "Sex_Ethnicity")
+
+sex_ethnicity_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications, by PI Sex*Ethnicity",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+sex_ethnicity_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/sex_ethnicity_fundability.png"), 
+       plot = sex_ethnicity_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+
+### Sex + Age
+
+```{r}
+# Define custom colors
+custom_colors <- c(
+    "Male.56 and Over"= RSSblue,      
+    "Male.36-55"= RSSlightblue, 
+    "Male.35 and Under"= RSSmint,  
+    "Female.56 and Over"= RSSred   ,    
+    "Female.36-55"= RSSorange,
+    "Female.35 and Under"= RSSgold
+  )
+
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "Sex_Age")
+
+sex_age_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications, by PI Sex*Age",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+sex_age_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/sex_age_fundability.png"), 
+       plot = sex_age_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+
+
+
+### Ethnicity + Age
+
+```{r}
+# Define custom colors
+custom_colors <- c(
+    "White.56 and Over"= RSSblue,      
+    "White.36-55"= RSSlightblue, 
+    "White.35 and Under"= RSSmint,  
+    "Ethnic Minority.56 and Over"= RSSred   ,    
+    "Ethnic Minority.36-55"= RSSorange,
+    "Ethnic Minority.35 and Under"= RSSgold
+  )
+
+# Plot the proportions and confidence intervals
+
+df <- combined_table %>% filter(Group == "Ethnicity_Age")
+
+sex_age_fundability <- ggplot(df, aes(x = Fundability, y = Proportion, fill = Demographic)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = CI_L, ymax = CI_U), width = 0.2, position = position_dodge(0.9)) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Rates of Funded, Fundable, and Not Fundable Applications, by PI Ethnicity*Age",
+       x = element_blank(),
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme(
+    plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold"),
+    plot.title.position = "plot",
+    #axis.title.x = element_text(size = 20, margin = margin(t = 15), face = "bold"),
+    axis.title.y = element_text(size = 20, margin = margin(r = 10), face = "bold"),
+    plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+    axis.text.x = element_text(size = 16, face = "bold"),
+    axis.text.y = element_text(size = 16, face = "bold"),
+    legend.position = "top",
+    legend.text = element_text(size = 16, face = "bold"),
+    legend.title = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+    plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+    #panel.grid.major = element_line(color = "gray90"),            # Optional: adjust grid color
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(size = 16, face = "bold")
+    ) +
+  geom_text(aes(y = 0.03, label = scales::percent(Proportion, accuracy = 0.1)),
+            size = 8,
+            angle = 90,
+            position = position_dodge(width = 0.9), 
+            vjust = 1, 
+            color = "white") +
+  
+    facet_wrap(~Application_Type, scale = "fixed")
+
+
+sex_age_fundability
+# Save the plot
+ggsave(filename = paste0("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 05/ethnicity_age_fundability.png"), 
+       plot = sex_age_fundability, width = 14, height = 12, dpi = 600, bg = "white")
+```
+

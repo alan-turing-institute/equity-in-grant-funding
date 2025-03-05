@@ -1,0 +1,389 @@
+---
+title: "Bias in EPSRC Peer Review - Description of Demographics of the EPSRC Populations"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12, warning = FALSE, messages = FALSE)
+
+## Libraries
+library(boot)
+library(tidyverse)
+library(kableExtra)
+library(scales)
+library(tibble)
+library(purrr)
+library(nortest)
+library(pscl)  # For pseudo-R^2
+library(betareg)  # For beta regression
+library(openxlsx)   # for saving tables as excel files
+library(cowplot)
+
+
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/General Descriptives"
+
+
+## Set key file names
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+## Define the RSS Colour palette
+
+RSSgold       <- "#D3A41B" # Female
+RSSblue       <- "#004B6D" # Male
+RSSred        <- "#cc0000" # Not Disclosed
+RSStaupe      <- "#a6a086" # Unknown
+RSSgreen      <- "#009933" # White
+RSSpurple     <- "#7879b9" # Non UK
+RSSdark       <- "#393f4d" # UK
+RSSlightblue  <- "#6db4c0" # Ethnic Minority
+RSSseablue    <- "#287fc3" # No Known Disability
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" # Known Disability
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_25andunder <- "#b6d6b3"
+col_2635 <- "#87bd00"
+col_3645 <- "#299907"
+col_4655 <- "#146f03"
+col_5665 <- "#054907"
+col_66 <- "#0f2808"
+col_white <- "#a7a7c1"
+col_chinese <- "#74749d"
+col_black <- "#1e3399"
+col_mixed <- "#090771"
+col_asian <- "#37163e"
+col_other <- "#59095f"
+col_eth7 <- "#34086e"
+```
+
+
+# {.tabset}
+
+## Data Preparation
+
+```{r echo=FALSE, include = FALSE}
+## Sets up application-level dataframe
+
+## 1.1 Select columns from Grants.df
+Grants_selected.df <- EPSRC$Grants.df %>%
+  select(AnonPROJ,
+         GrantCategory,
+         GrantOutcome,
+         AdjustedApplicationValue
+  )
+
+
+## 1.2 Now select additional columns from PrincipalInvestigators.df
+PI_details.df <- EPSRC$PI.df %>%
+  select(
+    AnonPROJ,
+    AnonINV,
+    Sex,
+    AgeRange,
+    Disability,
+    EthnicGroup,
+    EthnicityBinary,
+    NationalityBinary,
+    Role
+  )
+
+
+## 1.3 Merge with PrincipalInvestigators.df
+Q0Grants.df <- left_join(Grants_selected.df,
+                         PI_details.df,
+                 by = "AnonPROJ"
+)
+
+
+## 1.4 Cleanup
+rm(PI_details.df, 
+   Grants_selected.df
+)
+
+## Add a binary Outcome variable for Funded/Unfunded
+Q0Grants.df$BinaryOutcome <- ifelse(Q0Grants.df$GrantOutcome == "Funded", "Funded", "Unfunded")
+
+## Create factors that identify unknown, not disclosed, and disclosed for each demographic variable, plus
+## a factor that identifies whether a row would be removed under listwise deletion of all Unknowns and Not
+## Disclosed values across each of the demographic variables
+Q0Grants.df <- Q0Grants.df %>% 
+  mutate(
+    testSex = ifelse(Sex == "Unknown", "Unknown", ifelse(Sex == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testEthnicityBinary = ifelse(EthnicityBinary == "Unknown", "Unknown", ifelse(EthnicityBinary == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testAgeRange = ifelse(AgeRange == "Unknown", "Unknown", ifelse(AgeRange == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testNationality = ifelse(NationalityBinary == "Unknown", "Unknown", ifelse(NationalityBinary == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testDisability = ifelse(Disability == "Unknown", "Unknown", ifelse(Disability == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testAll = if_else(
+      if_all(c("testSex", "testEthnicityBinary", "testAgeRange", "testNationality", "testDisability"), ~ . == "Disclosed"),
+      "All Disclosed",
+      "Not all disclosed"
+    )
+  )
+
+```
+
+
+```{r}
+## Sets up individual-level dataframes
+
+
+# All -------------------------------------------------------------------
+# Select required columns and filter unique AnonINV
+UniqueAward.df<- EPSRC$PI.df %>%
+  select(Role, Sex, EthnicityBinary, EthnicGroup, AgeRange, Disability, NationalityBinary, AnonINV) %>%
+  group_by(Role, Sex, EthnicityBinary, EthnicGroup, AgeRange, Disability, NationalityBinary) %>%
+  distinct(AnonINV, .keep_all = TRUE) %>%
+  ungroup()
+
+
+# Address duplicates where people jump an age bracket within a year
+# 2.1 Create Intermediate.df with rows where AnonINV appears more than once within and Role group
+Intermediate.df <- UniqueAward.df%>%
+  select(AgeRange, AnonINV) %>%
+  distinct()
+
+# 2.2 Add a new column 'AgeMax' by extracting the first two characters of 'AgeRange' and converting them to numeric
+Intermediate.df <- Intermediate.df %>%
+  mutate(AgeMax = as.numeric(substr(AgeRange, 1, 2)))
+
+# 2.3 For each AnonINV, keep only the row with the highest AgeMax (i.e. the highest age they reached in the sample), then drop that column
+Intermediate.df <- Intermediate.df %>%
+  group_by(AnonINV) %>%
+  filter(AgeMax == max(AgeMax)) %>%
+  ungroup() %>%
+  select(-AgeMax)
+
+# 2.4 Remove rows in UniqueInvestigators.df that don't match exactly with a row in Intermediate.df
+UniqueAward.df<- UniqueAward.df%>%
+  inner_join(Intermediate.df, by = c("AgeRange", "AnonINV"))
+
+# 2.5 Delete Intermediate.df by removing it from the environment
+rm(Intermediate.df)
+
+#Add Award Rate to Unique
+
+# Step 1: Count total projects applied per AnonINV
+ProjectsApplied <- EPSRC$PI.df %>%
+  group_by(AnonINV) %>%
+  summarise(AllProjectsApplied = n(), .groups = 'drop')
+
+# Step 2: Count funded projects per AnonINV, defaulting to 0 if none are funded
+ProjectsFunded <- EPSRC$PI.df %>%
+  group_by(AnonINV) %>%
+  summarise(AllProjectsFunded = sum(GrantOutcome == "Funded"), .groups = 'drop')
+
+# Merge everything into UniqueAward.df
+UniqueAward.df<- UniqueAward.df%>%
+  left_join(ProjectsApplied, by = "AnonINV") %>%
+  left_join(ProjectsFunded, by = "AnonINV") %>%
+  mutate(AllAwardRate = AllProjectsFunded / AllProjectsApplied)
+
+# Add Average Award Value
+
+# Step 1: Calculate the sum of AdjustedApplicationValue for each AnonINV
+summed_values <- EPSRC$PI.df %>% filter(GrantOutcome=="Funded") %>%
+  select(AnonINV, AdjustedApplicationValue) %>%
+  group_by(AnonINV) %>%
+  summarise(
+    AllValueSum = sum(AdjustedApplicationValue, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Step 2: Join the summed values to UniqueAward.df
+UniqueAward.df<- UniqueAward.df%>%
+  left_join(summed_values, by = "AnonINV")
+
+# Step 3: Calculate average
+
+UniqueAward.df$AllAveAwardValue <- UniqueAward.df$AllValueSum/UniqueAward.df$AllProjectsFunded
+# Replace NA with 0 in specified columns
+UniqueAward.df<- UniqueAward.df%>%
+  mutate_at(vars(one_of(c("AllValueSum", "AllAveAwardValue"))), ~ replace(., is.na(.), 0))
+
+## Create factors that identify unknown, not disclosed, and disclosed for each demographic variable, plus
+## a factor that identifies whether a row would be removed under listwise deletion of all Unknowns and Not
+## Disclosed values across each of the demographic variables
+UniqueAward.df <- UniqueAward.df %>% 
+  mutate(
+    testSex = ifelse(Sex == "Unknown", "Unknown", ifelse(Sex == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testEthnicityBinary = ifelse(EthnicityBinary == "Unknown", "Unknown", ifelse(EthnicityBinary == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testAgeRange = ifelse(AgeRange == "Unknown", "Unknown", ifelse(AgeRange == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testNationality = ifelse(NationalityBinary == "Unknown", "Unknown", ifelse(NationalityBinary == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testDisability = ifelse(Disability == "Unknown", "Unknown", ifelse(Disability == "Not Disclosed", "Not Disclosed", "Disclosed")),
+    testAll = if_else(
+      if_all(c("testSex", "testEthnicityBinary", "testAgeRange", "testNationality", "testDisability"), ~ . == "Disclosed"),
+      "All Disclosed",
+      "Not all disclosed"
+    )
+  )
+
+```
+
+
+```{r}
+level_colors <-
+  c(
+    "Male"= RSSblue,      
+    "Female"= RSSred,    
+    "UK"=RSSblue,        
+    "Non UK"=RSSred,     
+    "Known Disability"=RSSred   ,    
+    "No Known Disability"=RSSblue  ,   
+    "White"=RSSblue  ,   
+    "Ethnic Minority"=RSSred  ,  
+    "Unknown"= RSSlightgrey  , 
+    "Not Disclosed"=col_notdisclosed  ,
+    "25 and Under"=col_25andunder ,
+    "26-35"=col_2635 ,
+    "36-45"=col_3645 ,
+    "46-55"=col_4655 ,
+    "56-65"=col_5665 ,
+    "66+"=col_66 ,
+    "Chinese"=col_chinese, 
+    "Black"=col_black, 
+    "Mixed"=col_mixed, 
+    "Asian"=col_asian, 
+    "Other"=col_other
+  )
+
+feature_barplot <- function(df, group_var, feature, plot_title = '') {
+    plot_df <- df %>% 
+        select(!!sym(group_var), !!sym(feature)) %>%
+        distinct() %>% 
+        filter(!!sym(feature) != "Unknown")
+    
+    ggplot(plot_df, aes(x = !!sym(feature), fill = !!sym(feature))) +
+        geom_bar() +
+        geom_text(stat = 'count', 
+                  aes(label = scales::percent(..count../sum(..count..), accuracy = 0.1)), 
+                  vjust = -0.5, size = 7, fontface = "bold", color = "black") + # Percentage labels at the top
+        scale_y_continuous(limits = c(0, 12000), expand = c(0, 0)) +
+        labs(y = 'Counts', x = '') +
+        scale_fill_manual(values = level_colors) +
+        # theme(            #### commenting out for the sake of the html
+        #   plot.title = element_text(size = 24, hjust = 0.5, margin = margin(b = 15), face = "bold", color = "black"),
+        #   plot.title.position = "plot",
+        #   axis.title.y = element_text(size = 22, margin = margin(r = 10), face = "bold", color = "black"),
+        #   plot.margin = margin(t = 20, r = 10, b = 10, l = 10),
+        #   axis.text.x = element_text(size = 20, face = "bold", color = "black"),
+        #   axis.text.y = element_text(size = 20, face = "bold", color = "black"),
+        #   legend.position = "top",
+        #   legend.text = element_text(size = 16, face = "bold"),
+        #   legend.title = element_blank(),
+        #   panel.background = element_rect(fill = "white", color = NA),  # Set panel background to white
+        #   plot.background = element_rect(fill = "white", color = NA),   # Set plot background to white
+        #   panel.grid.minor = element_blank(),
+        #   strip.text = element_text(size = 16, face = "bold")
+        # ) +
+        ggtitle(plot_title)
+}
+
+
+
+
+plot_demographics <- function(df, ID_col, save_output = FALSE, savename = 'demographics') {
+    
+    # Create individual plots
+    p1 <- feature_barplot(df, ID_col, 'Sex', "Count of Population by Sex") + theme(legend.position = "none") 
+    p2 <- feature_barplot(df, ID_col, 'EthnicityBinary', 'Count of Population by Ethnicity (Binary)') + theme(legend.position = "none") 
+    p3 <- feature_barplot(df, ID_col, 'EthnicGroup', 'Count of Population by Ethnicity (Detailed)') + theme(legend.position = "none") 
+    p4 <- feature_barplot(df, ID_col, 'AgeRange', 'Count of Population by Age Range') + theme(legend.position = "none") 
+    p5 <- feature_barplot(df, ID_col, 'NationalityBinary', 'Count of Population by Nationality (Binary)') + theme(legend.position = "none") 
+    p6 <- feature_barplot(df, ID_col, 'Disability', 'Count of Population by Disability') + theme(legend.position = "none")
+    
+    # Combine into a grid
+    combined_plot <- plot_grid(p1, p2, p3, p4, p5, p6, ncol = 2)
+    
+    # Save plots if save_output is TRUE
+    if (save_output) {
+        # Save the combined plot grid
+        ggsave(filename = paste0("general_descriptives/", savename, '_grid.png'),
+               plot = combined_plot, width = 12, height = 12)
+        
+        # Save individual plots
+        ggsave(filename = paste0("general_descriptives/", savename, '_Sex.png'),
+               plot = p1, width = 12, height = 12)
+        ggsave(filename = paste0("general_descriptives/", savename, '_EthnicityBinary.png'),
+               plot = p2, width = 12, height = 12)
+        ggsave(filename = paste0("general_descriptives/", savename, '_EthnicGroup.png'),
+               plot = p3, width = 12, height = 12)
+        ggsave(filename = paste0("general_descriptives/", savename, '_AgeRange.png'),
+               plot = p4, width = 12, height = 12)
+        ggsave(filename = paste0("general_descriptives/", savename, '_NationalityBinary.png'),
+               plot = p5, width = 12, height = 12)
+        ggsave(filename = paste0("general_descriptives/", savename, '_Disability.png'),
+               plot = p6, width = 12, height = 12)
+    }
+    
+    return(combined_plot)
+}
+
+
+```
+
+
+## Plotting Descriptives - All Principal Investigators (Fellows + PIs, as given in data)
+
+```{r}
+setwd("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/General Descriptives/")
+
+df <- UniqueAward.df %>% distinct(AnonINV, .keep_all = TRUE)
+
+
+plot_demographics(df %>% filter(Role %in% c('Fellow', 'Principal Investigator')), 'AnonINV', TRUE, 'applicant_demographics.PI_fellow')
+```
+
+## Plotting Descriptives - Fellows only
+
+```{r}
+setwd("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/General Descriptives/")
+
+plot_demographics(df %>% filter(Role == 'Fellow'), 'AnonINV', TRUE, 'applicant_demographics.fellow')
+```
+
+## Plotting Descriptives - Principal Investigators (non-Fellow) only
+
+```{r}
+setwd("C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/General Descriptives/")
+
+plot_demographics(df %>% filter(Role == 'Principal Investigator'), 'AnonINV', TRUE, 'applicant_demographics.PI')
+
+```
+
+

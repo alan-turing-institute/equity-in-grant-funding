@@ -1,0 +1,1089 @@
+---
+title: "Bias in EPSRC Peer Review - Research Question 20"
+author: 'Contributors: Ged Hiscoke & Dakota Langhals, Royal Statistical Society'
+date: "Version: `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+output:
+  html_document:
+    code_folding: hide
+    toc_float: yes
+  pdf_document: default
+  word_document:
+    reference_docx: "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Draft Outputs/r_style_template.docx"
+    highlight: null
+subtitle: 'Status: Final'
+---
+
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+
+##Universal Document settings
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 12, warning = FALSE, message = FALSE)
+
+
+## Libraries
+library(dplyr)      # For tidy coding
+library(kableExtra) # For tables
+library(ggplot2)    # For plotting
+library(patchwork)  # For plot displays
+library(tidyr)      # For tidy coding
+library(ggforce)    # For tidy labelling on plots 
+library(gridExtra)  # For display of joint plots
+library(knitr)
+library(openxlsx)   # for saving tables as excel files
+library(scales)     # For commas in plot labels
+library(boot)
+library(margins)
+library(lme4)
+library(performance)
+library(see)
+library(DHARMa)
+library(lmtest)
+library(jtools)
+library(sandwich)
+library(stargazer)
+library(car)
+library(lattice)
+library(latticeExtra)
+
+
+
+
+
+## Set key file locations
+## Directory for saving local high resolution copies of plots etc
+data_folder_path    <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/PROJ2023.002 - Data folder DL Pickup/Datasets/"
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+
+
+
+## Set key file names
+WorkingEnvironment  <- "PROJ2023.002 Environment - WORKING.RData"
+
+
+## Load needed data
+load(file = file.path(data_folder_path, WorkingEnvironment))
+
+
+
+## Define the RSS colour palette
+
+RRSSgold      <- "#D3A41B" 
+RSSblue       <- "#004B6D" 
+RSSred        <- "#cc0000" 
+RSStaupe      <- "#a6a086" 
+RSSgreen      <- "#009933" 
+RSSpurple     <- "#7879b9" 
+RSSdark       <- "#393f4d" 
+RSSlightblue    <- "#6db4c0" 
+RSSseablue       <- "#287fc3" 
+RSSorange     <- "#d86027"
+RSSlightgrey  <- "#bdbdbd"
+RSSmidgrey    <- "#939393"
+RSSdarkkgrey  <- "#7e7e7e"
+RSSjungle     <- "#1f3d0c"
+RSSmint       <- "#5C9090" 
+RSSherb       <- "#689E88"
+RSSbright     <- "#8D31A4"
+RSSlime       <- "#7DCF7A"
+RSSviolet     <- "#614182"
+
+
+##Variable specific colours
+col_male      <- "#004b6d"
+col_female    <- "#a6700a"
+col_uk        <- "#393f4d"
+col_nonuk     <- "#614182"
+col_dis       <- "#005b49"
+col_nodis     <- "#8e8e00"
+col_white     <- "#7f3c21"
+col_ethmin    <- "#3a3877"
+col_unknown   <- "#bdbdbd"
+col_notdisclosed  <- "#640106"
+col_age1 <- "#b6d6b3"
+col_age2 <- "#87bd00"
+col_age3 <- "#299907"
+col_age4 <- "#146f03"
+col_age5 <- "#054907"
+col_age6 <- "#0f2808"
+col_eth1 <- "#a7a7c1"
+col_eth2 <- "#74749d"
+col_eth3 <- "#1e3399"
+col_eth4 <- "#090771"
+col_eth5 <- "#37163e"
+col_eth6 <- "#59095f"
+col_eth7 <- "#34086e"
+
+plot_colors <-
+  c(
+    "Male" = col_male,
+    "Female" = col_female,
+    "UK" = col_uk,
+    "Non UK" = col_nonuk,
+    "Known Disability" = col_dis   ,
+    "No Known Disability" = col_nodis  ,
+    "White" = col_white  ,
+    "Ethnic Minority" = col_ethmin  ,
+    "Unknown" = RSSdarkkgrey  ,
+    "Not Disclosed" = "black"  ,
+    "25 and Under" = col_25andunder ,
+    "26-35" = col_2635 ,
+    "36-45" = col_3645 ,
+    "46-55" = col_4655 ,
+    "56-65" = col_5665 ,
+    "66+" = col_66 ,
+    "White" = col_white,
+    "Chinese" = col_chinese,
+    "Black" = col_black,
+    "Mixed" = col_mixed,
+    "Asian" = col_asian,
+    "Other" = col_other
+    
+  )
+```
+
+# {.tabset}
+
+## Data Preparation
+
+```{r data_preparation}
+## 1.1 Select columns from Grants.df
+Grants_selected.df <- EPSRC$Grants.df %>%
+  select(AnonPROJ,
+         GrantCategory,
+         GrantOutcome,
+         AdjustedApplicationValue,
+         Driver,
+         AnonREG
+  )
+
+
+## 1.2 Now select additional columns from PrincipalInvestigators.df
+PI_details.df <- EPSRC$PI.df %>%
+  select(
+    AnonPROJ,
+    AnonINV,
+    Sex,
+    AgeRange,
+    Disability,
+    EthnicGroup,
+    EthnicityBinary,
+    NationalityBinary,
+    AnonTHM,
+    Role
+  )
+
+
+## 1.3 Merge with PrincipalInvestigators.df
+Q20THMdata.df <- left_join(PI_details.df,
+                 Grants_selected.df ,
+                 by = "AnonPROJ"
+)
+
+
+## 1.4 Cleanup
+rm(PI_details.df, 
+   Grants_selected.df
+)
+
+## Add a binary Outcome variable for Funded/Unfunded
+Q20THMdata.df$BinaryOutcome <- ifelse(Q20THMdata.df$GrantOutcome == "Funded", "Funded", "Not Funded")
+
+
+## RAG data has the Research Areas dataframe joined to PI.df for demographics. 
+## Note that there can be multiple research areas per project, and each is given a weighting (RAFraction) that reflects the fraction of a research project assigned to that research area. We filter the projects such that they only reflect the research area with the highest weighting.  Thus, the data represent the primary research area for each project.  In the case of ties, we keep one row per tied research area. Further work may wish to take a different approach to this and develop a lens focusing more explicitly on interdisciplinarity.  
+
+df <- EPSRC$ResearchAreas.df 
+df <- df %>% filter(AnonRAG != "RAG-01") %>% droplevels() #RAG 01 has 3 projects. there is no RAG - 04
+
+df <- df %>%
+  group_by(AnonPROJ) %>% 
+  slice_max(RAFraction, with_ties = TRUE) %>% ## keeps only the RAG with the highest fraction, keeping multiple per project only if there is a tie.
+  distinct(AnonRAG, .keep_all = TRUE) %>% ## ensures each RAG only has one row per project. Necessary because if two research areas grouped into the same RAG had tied RAFractions, the RAG would be represented twice in the data.
+  ungroup()
+
+## Re-numbering the RAGs to avoid gaps in the numbers in the report - requested by EPSRC.
+df <- df %>%  mutate(AnonRAG = case_when(AnonRAG == "RAG-02" ~ "RAG-01",
+                     AnonRAG == "RAG-03" ~ "RAG-02",
+                     AnonRAG == "RAG-05" ~ "RAG-03",
+                     AnonRAG == "RAG-06" ~ "RAG-04",
+                     AnonRAG == "RAG-07" ~ "RAG-05",
+                     AnonRAG == "RAG-08" ~ "RAG-06",
+                     AnonRAG == "RAG-09" ~ "RAG-07",
+                     AnonRAG == "RAG-10" ~ "RAG-08",
+                     AnonRAG == "RAG-11" ~ "RAG-09",
+                     TRUE ~ AnonRAG))
+
+Q20RAGdata.df <- Q20THMdata.df %>% 
+  left_join(df, by = "AnonPROJ")
+
+Q20RAGdata.df$BinaryOutcome <- ifelse(Q20RAGdata.df$GrantOutcome == "Funded", "Funded", "Not Funded")
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+Q20RAGdata.df <- Q20RAGdata.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+Q20THMdata.df <- Q20THMdata.df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+
+```
+
+
+
+
+
+## Mixed Effects Model for Award Value with random intercepts by Research Area Group and random slopes by Demographics varying by Research Area Group
+<br>
+
+```{r fig.height = 12, fig.width = 12, warnings = FALSE, message = FALSE}
+df <- Q20RAGdata.df %>% filter(AdjustedApplicationValue > 0 & BinaryOutcome == "Funded") 
+
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+df$AgeRangeCollapsed <- factor(df$AgeRangeCollapsed)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+
+model1 <- lmer(AdjustedApplicationValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + Disability + NationalityBinary + 
+              (1 + Sex + EthnicityBinary + AgeRangeCollapsed | AnonRAG),
+              data = df)
+
+
+```
+
+```{r}
+
+chosen_model <- model1
+
+print(chosen_model)
+check_model(chosen_model)
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+tab <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+tab <- as.data.frame(tab)
+tab$Predictor <- row.names(tab)
+tab <- tab %>% 
+  mutate(Predictor = case_when(
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "NationalityBinaryNot Disclosed" ~ "Nationality Not Disclosed",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Female Ethnic Minority",
+    Predictor == "SexFemale:AgeRangeCollapsed35_and_Under" ~ "Female under 35",
+    Predictor == "SexFemale:AgeRangeCollapsed56_and_Over" ~ "Female over 55",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35_and_Under" ~ "Ethnic Minority under 35",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56_and_Over" ~ "Ethnic Minority over 55",
+    TRUE ~ Predictor 
+  ))
+
+# table of estimates
+print(tab %>% select(-Predictor))
+
+
+# Plot coefficients with confidence intervals
+fig20.01 <- ggplot(tab, aes(x = Predictor, y = Est)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = LL, ymax = UL), width = 0.2) +
+  theme_minimal() +
+  labs(title = "Fixed Effects Estimates",
+       x = "Predictor",
+       y = "Award Value (£ millions)") +
+  coord_flip()  # Flip coordinates for better readability
+
+# Print the plot
+fig20.01
+
+
+fig20.02 <- lattice::dotplot(ranef(chosen_model, which = "AnonRAG", condVar = TRUE))
+
+fig20.02
+
+
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+ggsave(filename = paste0(figure_folder_path, "/fixed_effects_RAG_award_value.png"), 
+       plot = fig20.01, width = 12, height = 12, dpi = 600, bg = "white")
+
+
+
+output_path <- paste0(figure_folder_path, "/random_effects_RAG_award_value.png")
+png(filename = output_path, width = 12, height = 12, units = "in", res = 600, bg = "white")
+print(fig20.02)
+dev.off()
+
+
+```
+
+
+
+## Mixed Effects Model for Award Value with random intercepts by Theme and random slopes by Demographics varying by Theme
+
+```{r fig.height = 12, fig.width = 12, warnings = FALSE, message = FALSE}
+df <- Q20THMdata.df %>% filter(AdjustedApplicationValue > 0 & BinaryOutcome == "Funded") 
+
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+df$AgeRangeCollapsed <- factor(df$AgeRangeCollapsed)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+
+model1 <- lmer(AdjustedApplicationValue ~ Sex + EthnicityBinary + AgeRangeCollapsed + Disability + NationalityBinary + Driver + GrantCategory +
+              (1 + Sex + EthnicityBinary + AgeRangeCollapsed | AnonTHM),
+              data = df)
+
+```
+
+```{r}
+
+chosen_model <- model1
+
+print(chosen_model)
+check_model(chosen_model)
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates with 95% CI
+tab <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+
+tab <- as.data.frame(tab)
+tab$Predictor <- row.names(tab)
+tab <- tab %>% 
+  mutate(Predictor = case_when(
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "NationalityBinaryNot Disclosed" ~ "Nationality Not Disclosed",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Female Ethnic Minority",
+    Predictor == "SexFemale:AgeRangeCollapsed35_and_Under" ~ "Female under 35",
+    Predictor == "SexFemale:AgeRangeCollapsed56_and_Over" ~ "Female over 55",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35_and_Under" ~ "Ethnic Minority under 35",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56_and_Over" ~ "Ethnic Minority over 55",
+    TRUE ~ Predictor 
+  ))
+
+# table of estimates
+print(tab %>% select(-Predictor))
+
+
+# Plot coefficients with confidence intervals
+fig20.03 <- ggplot(tab, aes(x = Predictor, y = Est)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = LL, ymax = UL), width = 0.2) +
+  theme_minimal() +
+  labs(title = "Fixed Effects Estimates",
+       x = "Predictor",
+       y = "Award Value (£ millions)") +
+  coord_flip()  # Flip coordinates for better readability
+
+# Print the plot
+fig20.03
+
+fig20.04 <- lattice::dotplot(ranef(chosen_model, which = "AnonTHM", condVar = TRUE))
+fig20.04
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+ggsave(filename = paste0(figure_folder_path, "/fixed_effects_THM_award_value.png"), 
+       plot = fig20.03, width = 12, height = 12, dpi = 600, bg = "white")
+
+
+
+
+output_path <- paste0(figure_folder_path, "/random_effects_THM_award_value.png")
+png(filename = output_path, width = 12, height = 12, units = "in", res = 600, bg = "white")
+print(fig20.04)
+dev.off()
+
+```
+
+
+
+
+## Mixed Effects Model for Binary Funding Outcome with random intercepts by Research Area Group and random slopes by Demographics varying by Research Area Group
+
+```{r fig.height = 12, fig.width = 12, warnings = FALSE, message = FALSE}
+df <- Q20RAGdata.df 
+
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+df$AgeRangeCollapsed <- factor(df$AgeRangeCollapsed)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+# Ensure outcome is readable by glmer
+df <- df %>% 
+  mutate(BinaryOutcome = factor(BinaryOutcome)) %>% 
+  mutate(BinaryOutcome = relevel(BinaryOutcome, ref = "Not Funded")) ## this coding ensures that the "success" category is "Funded" rather than "Not Funded"
+
+
+
+model1 <- glmer(BinaryOutcome ~ Sex + EthnicityBinary + AgeRangeCollapsed + Disability + NationalityBinary + Driver + GrantCategory +
+              (1 + Sex + EthnicityBinary + AgeRangeCollapsed | AnonRAG),
+              data = df,
+              family = binomial(link = "logit"))
+
+
+
+
+chosen_model <- model1
+
+print(chosen_model)
+check_model(chosen_model)
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates as odds ratios with 95% CI 
+tab <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+tab <- exp(tab)
+
+tab <- as.data.frame(tab)
+tab$Predictor <- row.names(tab)
+tab <- tab %>% 
+  mutate(Predictor = case_when(
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "NationalityBinaryNot Disclosed" ~ "Nationality Not Disclosed",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Female Ethnic Minority",
+    Predictor == "SexFemale:AgeRangeCollapsed35_and_Under" ~ "Female under 35",
+    Predictor == "SexFemale:AgeRangeCollapsed56_and_Over" ~ "Female over 55",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35_and_Under" ~ "Ethnic Minority under 35",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56_and_Over" ~ "Ethnic Minority over 55",
+    TRUE ~ Predictor 
+  ))
+
+# table of estimates
+print(tab %>% select(-Predictor))
+
+
+# Plot coefficients with confidence intervals
+fig20.05 <- ggplot(tab, aes(x = Predictor, y = Est)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = LL, ymax = UL), width = 0.2) +
+  theme_minimal() +
+  labs(title = "Fixed Effects Estimates",
+       x = "Predictor",
+       y = "Odds Ratios") +
+  coord_flip()  # Flip coordinates for better readability
+
+# Print the plot
+fig20.05
+
+fig20.06 <- lattice::dotplot(ranef(chosen_model, which = "AnonRAG", condVar = TRUE))
+fig20.06
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+ggsave(filename = paste0(figure_folder_path, "/fixed_effects_RAG_binary_funding.png"), 
+       plot = fig20.05, width = 12, height = 12, dpi = 600, bg = "white")
+
+
+
+output_path <- paste0(figure_folder_path, "/random_effects_RAG_binary_funding.png")
+png(filename = output_path, width = 12, height = 12, units = "in", res = 600, bg = "white")
+print(fig20.06)
+dev.off()
+```
+
+
+## Mixed Effects Model for Binary Funding Outcome with random intercepts by Theme and random slopes by Demographics varying by Theme
+
+```{r fig.height = 12, fig.width = 12, warnings = FALSE, message = FALSE}
+df <- Q20THMdata.df 
+
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+df$AgeRangeCollapsed <- factor(df$AgeRangeCollapsed)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+# Ensure outcome is readable by glmer
+df <- df %>% 
+  mutate(BinaryOutcome = factor(BinaryOutcome)) %>% 
+  mutate(BinaryOutcome = relevel(BinaryOutcome, ref = "Not Funded")) ## this coding ensures that the "success" category is "Funded" rather than "Not Funded"
+
+model1 <- glmer(BinaryOutcome ~ Sex + EthnicityBinary + AgeRangeCollapsed + Disability + NationalityBinary + Driver + GrantCategory +
+              (1 + Sex + EthnicityBinary + AgeRangeCollapsed | AnonTHM),
+              data = df,
+              family = binomial(link = "logit"))
+
+
+
+
+chosen_model <- model1
+
+print(chosen_model)
+check_model(chosen_model)
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates as odds ratios with 95% CI 
+tab <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+tab <- exp(tab)
+
+tab <- as.data.frame(tab)
+tab$Predictor <- row.names(tab)
+tab <- tab %>% 
+  mutate(Predictor = case_when(
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "NationalityBinaryNot Disclosed" ~ "Nationality Not Disclosed",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Female Ethnic Minority",
+    Predictor == "SexFemale:AgeRangeCollapsed35_and_Under" ~ "Female under 35",
+    Predictor == "SexFemale:AgeRangeCollapsed56_and_Over" ~ "Female over 55",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35_and_Under" ~ "Ethnic Minority under 35",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56_and_Over" ~ "Ethnic Minority over 55",
+    TRUE ~ Predictor  
+  ))
+
+# table of estimates
+print(tab %>% select(-Predictor))
+
+
+# Plot coefficients with confidence intervals
+fig20.07 <- ggplot(tab, aes(x = Predictor, y = Est)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = LL, ymax = UL), width = 0.2) +
+  theme_minimal() +
+  labs(title = "Fixed Effects Estimates",
+       x = "Predictor",
+       y = "Odds Ratios") +
+  coord_flip()  # Flip coordinates for better readability
+
+# Print the plot
+fig20.07
+
+fig20.08 <- lattice::dotplot(ranef(chosen_model, which = "AnonTHM", condVar = TRUE))
+fig20.08
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+ggsave(filename = paste0(figure_folder_path, "/fixed_effects_THM_binary_funding.png"), 
+       plot = fig20.07, width = 12, height = 12, dpi = 600, bg = "white")
+
+
+
+output_path <- paste0(figure_folder_path, "/random_effects_THM_binary_funding.png")
+png(filename = output_path, width = 12, height = 12, units = "in", res = 600, bg = "white")
+print(fig20.08)
+dev.off()
+
+```
+
+
+
+
+## Panel Ranking - Data Prep
+```{r}
+#----Identify the meeting info----------------------------------------------- 
+# Make sure the ranking is numberic 
+EPSRC$GrantMeeting.df$MeetingOrder <- as.numeric(EPSRC$GrantMeeting.df$MeetingOrder) 
+
+# Create temp.df with rows of the final meeting 
+temp.df <- EPSRC$GrantMeeting.df %>% 
+  group_by(AnonPROJ) %>% 
+  filter(MeetingOrder == max(MeetingOrder, na.rm = TRUE)) %>% 
+  ungroup() 
+
+# fill in NAs in not-fundable 
+temp.df <- temp.df %>% 
+  mutate(FundableByScore = ifelse(is.na(FundableByScore), 
+                                  ifelse(Decision == "Not Fundable", FALSE, TRUE), 
+                                  FundableByScore)) 
+
+# Remove applications with no ranking.  
+temp.df <- temp.df %>% 
+  filter(!is.na(RankOrder)) 
+
+#----Merge Quantiles into the main dataset------------------------------------ 
+GrantData.df <- Q20RAGdata.df%>% 
+  left_join(temp.df %>%  
+              select(AnonPROJ, RankOrder, FundableByScore, AnonMTG),  
+            by = "AnonPROJ") 
+
+GrantData.df <- GrantData.df %>% rename(BinarySuccess = BinaryOutcome)
+
+# Adjust FundableByScore based on BinarySuccess 
+GrantData.df <- GrantData.df %>% 
+  mutate(FundableByScore = if_else(BinarySuccess == "Funded" & FundableByScore == FALSE, TRUE, FundableByScore)) 
+
+calculate_quartiles <- function(rank_order, fundable_by_score) { 
+  # Adjust for NA or 0 in rank_order or NA in fundable_by_score 
+  # Treat 0 in RankOrder as equivalent to NA for the purpose of ranking 
+  rank_order[rank_order == 0] <- NA 
+  # If all fundable_by_score are NA, but rank_order has valid numbers, proceed as if they are fundable 
+  if (all(is.na(fundable_by_score)) && any(!is.na(rank_order))) { 
+    fundable_by_score[is.na(fundable_by_score)] <- TRUE 
+  } 
+
+  # If fundable_by_score is explicitly FALSE, treat all as "Unfundable" 
+  if (all(fundable_by_score == FALSE, na.rm = TRUE)) { 
+    return(rep("Unfundable", length(rank_order))) 
+  } else { 
+    # Check for unique valid values in rank_order 
+    valid_ranks <- unique(rank_order[!is.na(rank_order)]) 
+    if (length(valid_ranks) < 2) { 
+      return(rep("Unranked", length(rank_order))) 
+    } else { 
+      # Calculate quartiles for valid rank_order values, ensure breaks are unique 
+      quartiles <- quantile(rank_order[!is.na(rank_order)], probs = c(0.25, 0.5, 0.75), na.rm = TRUE) 
+      if (length(unique(quartiles)) < 3) {  # Check if quartile values are not unique 
+        return(rep("Unranked", length(rank_order))) 
+      } 
+      breaks = c(-Inf, quartiles, Inf) 
+      labels = c("1st Quartile", "2nd Quartile", "3rd Quartile", "4th Quartile") 
+      quartile_labels <- cut(rank_order, breaks = breaks, labels = labels, include.lowest = TRUE) 
+      return(as.character(quartile_labels)) 
+    } 
+  } 
+} 
+
+GrantData.df <- GrantData.df %>% 
+  group_by(AnonMTG, FundableByScore) %>% 
+  mutate(QuartileInfo = calculate_quartiles(RankOrder, FundableByScore)) %>% 
+  ungroup() 
+
+#----Clean up dataset---------------------------------------------------------- 
+# Replace NA in QuartileInfo with "Unranked" 
+GrantData.df <- GrantData.df %>% 
+  mutate(QuartileInfo = if_else(is.na(QuartileInfo), "Unranked", QuartileInfo)) 
+
+GrantData.df$QuartileInfo <- factor(GrantData.df$QuartileInfo, 
+                                    levels = c("1st Quartile", "2nd Quartile", "3rd Quartile", "4th Quartile","Unfundable","Unranked"), 
+                                    ordered = TRUE) 
+
+# Remove temp.df from the environment 
+rm(temp.df) 
+
+```
+
+```{r}
+# Binary outcome for funded/unfunded = *BinarySuccess*:
+GrantData.df %>% 
+  count(BinarySuccess)
+
+# Ordinal outcome for ranking quartile = *QuartileInfo*:
+GrantData.df %>% 
+  count(QuartileInfo)
+
+# New binary outcome for top ranking = *TopQuartile*:
+GrantData.df  <- GrantData.df %>% 
+  mutate(TopQuartile = if_else(QuartileInfo == "1st Quartile", QuartileInfo, "Not 1st Quartile")) 
+
+GrantData.df$TopQuartile <- as.factor(GrantData.df$TopQuartile) 
+GrantData.df %>% 
+  count(TopQuartile)
+
+
+# Splitting GrantData.df into two separate dataframes, because RAG will duplicate rows where there are ties for primary research area, and GrantData.df is built on the RAG data
+PR_RAGdata.df <- GrantData.df
+
+PR_THMdata.df <- distinct(GrantData.df, AnonPROJ, .keep_all = TRUE) 
+
+```
+
+
+## Mixed Effects Model for Binary Panel Ranking Outcome with random intercepts by Research Area Group and random slopes by Demographics varying by Research Area Group
+
+```{r fig.height = 12, fig.width = 12, warnings = FALSE, message = FALSE}
+df <- PR_RAGdata.df 
+
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+df$AgeRangeCollapsed <- factor(df$AgeRangeCollapsed)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+# Ensure outcome is readable by glmer
+df <- df %>% 
+  mutate(TopQuartile = factor(TopQuartile)) %>% 
+  mutate(TopQuartile = relevel(TopQuartile, ref = "Not 1st Quartile")) ## Ensures the "success" category is "1st Quartile"
+
+
+
+model1 <- glmer(TopQuartile ~ Sex + EthnicityBinary + AgeRangeCollapsed + Disability + NationalityBinary + Driver + GrantCategory +
+              (1 + Sex + EthnicityBinary + AgeRangeCollapsed | AnonRAG),
+              data = df,
+              family = binomial(link = "logit"))
+
+
+chosen_model <- model1
+
+print(chosen_model)
+check_model(chosen_model)
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates as odds ratios with 95% CI 
+tab <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+tab <- exp(tab)
+
+tab <- as.data.frame(tab)
+tab$Predictor <- row.names(tab)
+tab <- tab %>% 
+  mutate(Predictor = case_when(
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "NationalityBinaryNot Disclosed" ~ "Nationality Not Disclosed",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Female Ethnic Minority",
+    Predictor == "SexFemale:AgeRangeCollapsed35_and_Under" ~ "Female under 35",
+    Predictor == "SexFemale:AgeRangeCollapsed56_and_Over" ~ "Female over 55",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35_and_Under" ~ "Ethnic Minority under 35",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56_and_Over" ~ "Ethnic Minority over 55",
+    TRUE ~ Predictor  
+  ))
+
+# table of estimates
+print(tab %>% select(-Predictor))
+
+
+# Plot coefficients with confidence intervals
+fig20.09 <- ggplot(tab, aes(x = Predictor, y = Est)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = LL, ymax = UL), width = 0.2) +
+  theme_minimal() +
+  labs(title = "Fixed Effects Estimates",
+       x = "Predictor",
+       y = "Odds Ratios") +
+  coord_flip()  # Flip coordinates for better readability
+
+# Print the plot
+fig20.09
+
+fig20.10 <- lattice::dotplot(ranef(chosen_model, which = "AnonRAG", condVar = TRUE))
+fig20.10
+
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+ggsave(filename = paste0(figure_folder_path, "/fixed_effects_RAG_panel_ranking.png"), 
+       plot = fig20.09, width = 12, height = 12, dpi = 600, bg = "white")
+
+
+
+output_path <- paste0(figure_folder_path, "/random_effects_RAG_panel_ranking.png")
+png(filename = output_path, width = 12, height = 12, units = "in", res = 600, bg = "white")
+print(fig20.10)
+dev.off()
+
+```
+
+
+## Mixed Effects Model for Binary Funding Outcome with random intercepts by Theme and random slopes by Demographics varying by Theme
+
+```{r fig.height = 12, fig.width = 12, warnings = FALSE, message = FALSE}
+df <- PR_THMdata.df 
+
+
+## Removing unknown and not disclosed values
+df <- df %>%
+  filter(!Sex == "Unknown" &
+           !EthnicityBinary == "Unknown" &
+           !NationalityBinary == "Unknown" &
+           !AgeRange == "Unknown" &
+           !Disability == "Unknown" &
+           !Sex == "Not Disclosed" &
+           !EthnicityBinary == "Not Disclosed" &
+           !AgeRange == "Not Disclosed" &
+           !Disability == "Not Disclosed")
+
+
+# Collapsing age to align with ATI and make interactions more easily interpretable
+df <- df %>% 
+  mutate(AgeRangeCollapsed = case_when(AgeRange == "25 and Under" ~ "35_and_Under", 
+                                       AgeRange == "26-35" ~ "35_and_Under",
+                                       AgeRange == "36-45" ~ "36-55",
+                                       AgeRange == "46-55" ~ "36-55",
+                                       AgeRange == "56-65" ~ "56_and_Over",
+                                       AgeRange == "66+" ~  "56_and_Over"))
+
+df$AgeRangeCollapsed <- factor(df$AgeRangeCollapsed)
+
+## Ensure proper reference levels
+df$Sex <- relevel(df$Sex, ref = "Male")
+df$EthnicityBinary <- relevel(df$EthnicityBinary, ref = "White")
+df$AgeRangeCollapsed <- relevel(df$AgeRangeCollapsed, ref = "36-55")
+df$NationalityBinary <- relevel(df$NationalityBinary, ref = "UK")
+df$Disability <- relevel(df$Disability, ref = "No Known Disability")
+
+# Ensure outcome is readable by glmer
+df <- df %>% 
+  mutate(TopQuartile = factor(TopQuartile)) %>% 
+  mutate(TopQuartile = relevel(TopQuartile, ref = "Not 1st Quartile")) ## Ensures the "success" category is "1st Quartile"
+
+
+
+model1 <- glmer(TopQuartile ~ Sex + EthnicityBinary + AgeRangeCollapsed + Disability + NationalityBinary + Driver + GrantCategory +
+              (1 + Sex + EthnicityBinary + AgeRangeCollapsed | AnonTHM),
+              data = df,
+              family = binomial(link = "logit"))
+
+
+chosen_model <- model1
+
+print(chosen_model)
+check_model(chosen_model)
+
+# Calculate confidence intervals:
+se <- sqrt(diag(vcov(chosen_model)))
+
+# table of estimates as odds ratios with 95% CI 
+tab <- cbind(Est = fixef(chosen_model), LL = fixef(chosen_model) - 1.96 * se, UL = fixef(chosen_model) + 1.96 *se)
+tab <- exp(tab)
+
+tab <- as.data.frame(tab)
+tab$Predictor <- row.names(tab)
+tab <- tab %>% 
+  mutate(Predictor = case_when(
+    Predictor == "SexFemale" ~ "Female",
+    Predictor == "NationalityBinaryNot Disclosed" ~ "Nationality Not Disclosed",
+    Predictor == "NationalityBinaryNon UK" ~ "Non-UK Nationality",
+    Predictor == "EthnicityBinaryEthnic Minority" ~ "Ethnic Minority",
+    Predictor == "DisabilityKnown Disability" ~ "Known Disability",
+    Predictor == "AgeRangeCollapsed56_and_Over" ~ "Age > 55",
+    Predictor == "AgeRangeCollapsed35_and_Under" ~ "Age < 36",
+    Predictor == "(Intercept)" ~ "(Intercept)",
+    Predictor == "SexFemale:EthnicityBinaryEthnic Minority" ~ "Female Ethnic Minority",
+    Predictor == "SexFemale:AgeRangeCollapsed35_and_Under" ~ "Female under 35",
+    Predictor == "SexFemale:AgeRangeCollapsed56_and_Over" ~ "Female over 55",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed35_and_Under" ~ "Ethnic Minority under 35",
+    Predictor == "EthnicityBinaryEthnic Minority:AgeRangeCollapsed56_and_Over" ~ "Ethnic Minority over 55",
+    TRUE ~ Predictor  
+  ))
+
+# table of estimates
+print(tab %>% select(-Predictor))
+
+```
+
+```{r}
+# Plot coefficients with confidence intervals
+fig20.11 <- ggplot(tab, aes(x = Predictor, y = Est)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = LL, ymax = UL), width = 0.2) +
+  theme_minimal() +
+  labs(title = "Fixed Effects Estimates",
+       x = "Predictor",
+       y = "Odds Ratios") +
+  coord_flip()  # Flip coordinates for better readability
+
+# Print the plot
+fig20.11
+
+fig20.12 <- lattice::dotplot(ranef(chosen_model, which = "AnonTHM", condVar = TRUE))
+fig20.12
+
+```
+
+
+
+```{r}
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+ggsave(filename = paste0(figure_folder_path, "/fixed_effects_THM_panel_ranking.png"), 
+       plot = fig20.11, width = 12, height = 12, dpi = 600, bg = "white")
+
+
+output_path <- paste0(figure_folder_path, "/random_effects_THM_panel_ranking.png")
+png(filename = output_path, width = 12, height = 12, units = "in", res = 600, bg = "white")
+print(fig20.12)
+dev.off()
+
+```
+
+
+
+```{r save_plots, eval=FALSE, include=FALSE}
+figure_folder_path  <- "C:/Users/DakotaLanghals/OneDrive - Royal Statistical Society/EPSRC Grant Funding/Figures/Research Question 20"
+
+plotnumbers <- c(20.01, 20.02, 20.03, 20.04, 20.05, 20.06, 20.07, 20.08, 20.09, "20.10", 20.11, 20.12)
+
+save_plot.f(plotnumbers, 
+            figure_folder_path, 
+            dpi = 600,            
+            width = 1200, 
+            height = 800, 
+            units = "mm", 
+            scale = .25,
+            format = ".jpeg"       
+)
+```
+
